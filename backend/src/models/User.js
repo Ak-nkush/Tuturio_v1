@@ -15,6 +15,13 @@ const userSchema = new Schema(
     lockedUntil: { type: Date, default: null },
     passwordResetTokenHash: { type: String, default: null },
     passwordResetExpiresAt: { type: Date, default: null },
+    notificationPreferences: {
+      messages: { type: Boolean, default: true },
+      attendance: { type: Boolean, default: true },
+      progress: { type: Boolean, default: true },
+      announcements: { type: Boolean, default: true },
+      batch: { type: Boolean, default: true },
+    },
   },
   { timestamps: true },
 )
@@ -29,5 +36,12 @@ export function publicUser(user) {
     email: user.email,
     linkedStudentIds: user.linkedStudentIds,
     status: user.status,
+    notificationPreferences: user.notificationPreferences ?? {
+      messages: true,
+      attendance: true,
+      progress: true,
+      announcements: true,
+      batch: true,
+    },
   }
 }
