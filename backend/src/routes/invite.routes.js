@@ -76,7 +76,7 @@ router.post('/paired', requireAuth, requireRole('tutor'), async (req, res) => {
   batch.enrollment.push({
     studentId: linkedStudentId,
     joinedAt: new Date(),
-    status: 'active',
+    status: 'pending',
   })
   await batch.save()
 
@@ -162,9 +162,15 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
 
     if (invite.role === 'student') {
       const alreadyEnrolled = batch.enrollment.some(
-        (enrollment) => enrollment.studentId === req.user.userId && enrollment.status === 'active',
+        (enrollment) => enrollment.studentId === req.user.userId && enrollment.status !== 'removed',
       )
-      if (!alreadyEnrolled) {
+      const enrollment = batch.enrollment.find(
+        (enrollmentItem) => enrollmentItem.studentId === req.user.userId && enrollmentItem.status !== 'removed',
+      )
+      if (enrollment) {
+        enrollment.status = 'active'
+        await batch.save()
+      } else if (!alreadyEnrolled) {
         batch.enrollment.push({ studentId: req.user.userId, joinedAt: new Date(), status: 'active' })
         await batch.save()
       }
@@ -210,9 +216,15 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
 
     if (invite.role === 'student') {
       const alreadyEnrolled = batch.enrollment.some(
-        (enrollment) => enrollment.studentId === existing.userId && enrollment.status === 'active',
+        (enrollment) => enrollment.studentId === existing.userId && enrollment.status !== 'removed',
       )
-      if (!alreadyEnrolled) {
+      const enrollment = batch.enrollment.find(
+        (enrollmentItem) => enrollmentItem.studentId === existing.userId && enrollmentItem.status !== 'removed',
+      )
+      if (enrollment) {
+        enrollment.status = 'active'
+        await batch.save()
+      } else if (!alreadyEnrolled) {
         batch.enrollment.push({ studentId: existing.userId, joinedAt: new Date(), status: 'active' })
         await batch.save()
       }
@@ -248,9 +260,10 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
 
   if (invite.role === 'student') {
     const enrollment = batch.enrollment.find(
-      (enrollmentItem) => enrollmentItem.studentId === user.userId && enrollmentItem.status === 'active',
+      (enrollmentItem) => enrollmentItem.studentId === user.userId && enrollmentItem.status !== 'removed',
     )
     if (enrollment) {
+      enrollment.status = 'active'
       if (enrollment.parentId && !user.linkedParentIds.includes(enrollment.parentId)) {
         user.linkedParentIds.push(enrollment.parentId)
         await user.save()
@@ -291,7 +304,7 @@ async function linkParentToStudent(parentId, studentId, batch) {
   }
 
   const enrollment = batch.enrollment.find(
-    (enrollmentItem) => enrollmentItem.studentId === studentId && enrollmentItem.status === 'active',
+    (enrollmentItem) => enrollmentItem.studentId === studentId && enrollmentItem.status !== 'removed',
   )
   if (enrollment) {
     enrollment.parentId = parentId
@@ -333,7 +346,7 @@ router.post('/', requireAuth, requireRole('tutor'), async (req, res) => {
       batch.enrollment.push({
         studentId: linkedStudentId,
         joinedAt: new Date(),
-        status: 'active',
+        status: 'pending',
       })
       await batch.save()
     }

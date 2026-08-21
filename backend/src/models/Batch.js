@@ -5,7 +5,7 @@ const enrollmentSchema = new Schema(
     studentId: { type: String, required: true },
     parentId: { type: String, default: null },
     joinedAt: { type: Date, default: Date.now },
-    status: { type: String, enum: ['active', 'removed'], default: 'active' },
+    status: { type: String, enum: ['pending', 'active', 'removed'], default: 'active' },
   },
   { _id: false },
 )
