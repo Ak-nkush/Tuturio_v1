@@ -68,6 +68,7 @@ router.get('/batch/:batchId', requireRole('tutor'), async (req, res) => {
       .map((b) => ({ date: b.date, averagePercent: Math.round(b.total / b.count) }))
 
     res.json({
+      batchId: batch.batchId,
       batchName: batch.name,
       totalSessions: sessions.length,
       studentStats,

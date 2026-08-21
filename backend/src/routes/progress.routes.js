@@ -41,6 +41,23 @@ router.get('/batch/:batchId', async (req, res) => {
   }
 })
 
+router.get('/tutor/student/:studentId', requireRole('tutor'), async (req, res) => {
+  try {
+    const studentId = req.params.studentId
+    const owns = await Batch.exists({
+      tutorId: req.user.userId,
+      'enrollment.studentId': studentId,
+    })
+    if (!owns) return res.status(403).json({ error: 'This student is not in your batches' })
+
+    const progress = await Progress.find({ studentId, tutorId: req.user.userId }).sort({ date: -1 }).limit(100)
+    res.json({ progress })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 router.get('/student/me', async (req, res) => {
   try {
     const filter = { studentId: req.user.userId }

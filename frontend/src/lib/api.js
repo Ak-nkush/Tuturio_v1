@@ -8,7 +8,7 @@ async function parseJson(res) {
   }
 
   if (!res.ok) {
-    let msg = data.message;
+    let msg = data.message || data.error;
     if (!msg && (res.status === 502 || res.status === 504)) {
        msg = 'Unable to reach the server. Please ensure the backend is running (npm run dev in the backend folder).';
     }
@@ -37,6 +37,11 @@ export async function apiFetch(path, init) {
 
 export const authApi = {
   me: () => apiFetch('/api/auth/me'),
+  register: (body) =>
+    apiFetch('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   login: (email, password) =>
     apiFetch('/api/auth/login', {
       method: 'POST',
@@ -109,6 +114,7 @@ export const attendanceApi = {
     apiFetch(`/api/attendance/session/${sessionId}/student/${studentId}`, { method: 'DELETE' }),
   student: () => apiFetch('/api/attendance/student/me'),
   parent: () => apiFetch('/api/attendance/parent/students'),
+  tutorStudent: (studentId) => apiFetch(`/api/attendance/tutor/student/${studentId}`),
 }
 
 export const announcementApi = {
@@ -132,9 +138,13 @@ export const resourceApi = {
 export const progressApi = {
   byBatch: (batchId) => apiFetch(`/api/progress/batch/${batchId}`),
   bySession: (sessionId) => apiFetch(`/api/progress/session/${sessionId}`),
+  getBySession: (sessionId) => apiFetch(`/api/progress/session/${sessionId}`),
   student: () => apiFetch('/api/progress/student/me'),
   parent: () => apiFetch('/api/progress/parent/students'),
+  tutorStudent: (studentId) => apiFetch(`/api/progress/tutor/student/${studentId}`),
   create: (body) => apiFetch('/api/progress', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id, body) => apiFetch(`/api/progress/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  remove: (id) => apiFetch(`/api/progress/${id}`, { method: 'DELETE' }),
 }
 
 export const analyticsApi = {
@@ -142,6 +152,8 @@ export const analyticsApi = {
   batch: (batchId) => apiFetch(`/api/analytics/batch/${batchId}`),
   student: () => apiFetch('/api/analytics/student/overview'),
   parent: () => apiFetch('/api/analytics/parent/overview'),
+  exportAttendance: (batchId) => downloadCsv(`/api/analytics/export/attendance/${batchId}`),
+  exportProgress: (batchId) => downloadCsv(`/api/analytics/export/progress/${batchId}`),
 }
 
 export const assignmentApi = {
@@ -185,6 +197,28 @@ export const messageApi = {
 export const userApi = {
   archive: (userId) => apiFetch(`/api/users/${userId}/archive`, { method: 'POST' }),
   unarchive: (userId) => apiFetch(`/api/users/${userId}/unarchive`, { method: 'POST' }),
+}
+
+export const subjectApi = {
+  list: (includeArchived = false) =>
+    apiFetch(`/api/subjects${includeArchived ? '?includeArchived=true' : ''}`),
+  create: (name) => apiFetch('/api/subjects', { method: 'POST', body: JSON.stringify({ name }) }),
+  update: (subjectId, body) =>
+    apiFetch(`/api/subjects/${subjectId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  archive: (subjectId) => apiFetch(`/api/subjects/${subjectId}`, { method: 'DELETE' }),
+}
+
+async function downloadCsv(path) {
+  const res = await fetch(path, { credentials: 'include' })
+  if (!res.ok) throw new Error('Could not download file')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const match = /filename=([^;]+)/.exec(res.headers.get('Content-Disposition') ?? '')
+  link.href = url
+  link.download = match?.[1] ?? 'export.csv'
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 export const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']

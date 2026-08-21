@@ -1,0 +1,209 @@
+/* Session Workspace Styling */
+.session-workspace .workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.back-btn:hover {
+  color: var(--text);
+}
+
+.session-meta {
+  text-align: center;
+}
+
+.session-meta h1 {
+  font-size: 1.75rem;
+  margin: 0.5rem 0;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.status-badge.scheduled { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+.status-badge.active { background: rgba(52, 199, 89, 0.1); color: #34c759; }
+.status-badge.completed { background: rgba(156, 163, 175, 0.1); color: #9ca3af; }
+
+.workspace-tabs {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.workspace-tabs button {
+  background: transparent;
+  border: none;
+  padding: 1rem 1.5rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.workspace-tabs button:hover {
+  color: var(--text);
+}
+
+.workspace-tabs button.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.attendance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.attendance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.student-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.attendance-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.att-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.att-btn:hover { background: rgba(255, 255, 255, 0.05); }
+
+.att-btn.present.selected { background: rgba(52, 199, 89, 0.1); color: #34c759; border-color: #34c759; }
+.att-btn.absent.selected { background: rgba(255, 59, 48, 0.1); color: #ff3b30; border-color: #ff3b30; }
+.att-btn.late.selected { background: rgba(255, 149, 0, 0.1); color: #ff9500; border-color: #ff9500; }
+
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  margin-bottom: 2rem;
+}
+
+.alert.error {
+  background: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+  border: 1px solid rgba(255, 59, 48, 0.2);
+}
+
+.alert.success {
+  background: rgba(52, 199, 89, 0.1);
+  color: #34c759;
+  border: 1px solid rgba(52, 199, 89, 0.2);
+}
+
+.text-muted { color: var(--text-muted); }
+.mb-4 { margin-bottom: 1rem; }
+.mb-6 { margin-bottom: 1.5rem; }
+.mt-4 { margin-top: 1rem; }
+.mt-6 { margin-top: 1.5rem; }
+.mt-8 { margin-top: 2rem; }
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text);
+  padding: 0.625rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.form-input {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.resource-list,
+.announcement-list,
+.progress-feed {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.resource-list li,
+.announcement-item,
+.progress-item {
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.resource-list a {
+  color: var(--primary);
+}
+
+.invite-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .invite-grid {
+    grid-template-columns: 1fr;
+  }
+}

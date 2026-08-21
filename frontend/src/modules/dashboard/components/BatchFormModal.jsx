@@ -1,9 +1,8 @@
-import { useState } from 'react'
-import { DAY_LABELS } from '../../../lib/api'
+import { useEffect, useState } from 'react'
+import { DAY_LABELS, subjectApi } from '../../../lib/api'
 
 const EMPTY_FORM = {
   name: '',
-  subjects: '',
   days: [],
   time: '18:00',
 }
@@ -14,7 +13,6 @@ export function BatchFormModal({ batch, onClose, onSave }) {
     batch
       ? {
           name: batch.name,
-          subjects: (batch.subjects ?? []).join(', '),
           days: batch.schedule?.days ?? [],
           time: batch.schedule?.time ?? '18:00',
         }
@@ -22,6 +20,16 @@ export function BatchFormModal({ batch, onClose, onSave }) {
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [catalog, setCatalog] = useState([])
+  const [selected, setSelected] = useState(batch ? [...(batch.subjects ?? [])] : [])
+  const [newSubject, setNewSubject] = useState('')
+
+  useEffect(() => {
+    subjectApi
+      .list()
+      .then((res) => setCatalog(res.subjects ?? []))
+      .catch(() => setCatalog([]))
+  }, [])
 
   function toggleDay(day) {
     setForm((prev) => ({
@@ -37,7 +45,7 @@ export function BatchFormModal({ batch, onClose, onSave }) {
     try {
       const payload = {
         name: form.name.trim(),
-        subjects: form.subjects,
+        subjects: selected,
         schedule: { days: form.days, time: form.time },
       }
       if (isEdit) {
@@ -85,13 +93,52 @@ export function BatchFormModal({ batch, onClose, onSave }) {
           </div>
 
           <div className="auth-field">
-            <label htmlFor="batch-subjects">Subjects (comma-separated)</label>
-            <input
-              id="batch-subjects"
-              value={form.subjects}
-              onChange={(e) => setForm({ ...form, subjects: e.target.value })}
-              placeholder="Algebra, Geometry"
-            />
+            <label>Subjects</label>
+            {catalog.length === 0 && selected.length === 0 ? (
+              <p className="text-muted text-sm">Add a subject below, or manage them from Subjects in the sidebar.</p>
+            ) : (
+              <div className="day-picker">
+                {[...new Set([...catalog.map((s) => s.name), ...selected])].map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className={`day-chip ${selected.includes(name) ? 'selected' : ''}`}
+                    onClick={() =>
+                      setSelected((prev) =>
+                        prev.includes(name) ? prev.filter((item) => item !== name) : [...prev, name],
+                      )
+                    }
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="holiday-row mt-4">
+              <input
+                value={newSubject}
+                onChange={(e) => setNewSubject(e.target.value)}
+                placeholder="New subject name"
+              />
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={async () => {
+                  const name = newSubject.trim()
+                  if (!name) return
+                  try {
+                    const res = await subjectApi.create(name)
+                    setCatalog((prev) => [...prev, res.subject])
+                    setSelected((prev) => (prev.includes(res.subject.name) ? prev : [...prev, res.subject.name]))
+                    setNewSubject('')
+                  } catch (err) {
+                    setError(err.message)
+                  }
+                }}
+              >
+                Add subject
+              </button>
+            </div>
           </div>
 
           <div className="auth-field">

@@ -9,6 +9,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { messageRateLimiter } from '../middleware/rateLimit.js'
 import { areRelated } from '../services/relationshipService.js'
 import { notify } from '../services/notificationService.js'
+import { emitToUser } from '../services/socketService.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const uploadsDir = path.join(__dirname, '../../uploads/messages')
@@ -205,6 +206,10 @@ router.post('/', messageRateLimiter, optionalFiles, async (req, res) => {
       event: 'messages',
     })
 
+    // Real-time Socket.io emissions
+    emitToUser(receiverId, 'message:received', message)
+    emitToUser(req.user.userId, 'message:sent', message)
+
     res.status(201).json({ message })
   } catch (error) {
     console.error(error)
@@ -222,6 +227,9 @@ router.patch('/read', async (req, res) => {
       { senderId, receiverId: req.user.userId, isRead: false },
       { $set: { isRead: true } },
     )
+
+    // Notify the sender that their messages have been read
+    emitToUser(senderId, 'messages:read', { readerId: req.user.userId })
 
     res.json({ message: 'Messages marked as read' })
   } catch (error) {

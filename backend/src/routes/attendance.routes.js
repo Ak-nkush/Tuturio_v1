@@ -27,6 +27,33 @@ router.get('/session/:sessionId', requireRole('tutor'), validObjectIdParam('sess
   }
 })
 
+router.get('/tutor/student/:studentId', requireRole('tutor'), async (req, res) => {
+  try {
+    const studentId = req.params.studentId
+    const owns = await Batch.exists({
+      tutorId: req.user.userId,
+      'enrollment.studentId': studentId,
+    })
+    if (!owns) return res.status(403).json({ error: 'This student is not in your batches' })
+
+    const attendance = await Attendance.find({ studentId }).sort({ createdAt: -1 }).limit(200).lean()
+    const sessionIds = attendance.map((row) => row.sessionId).filter(Boolean)
+    const sessions = await Session.find({ _id: { $in: sessionIds }, tutorId: req.user.userId }).select(
+      'date topic batchId',
+    )
+    const byId = Object.fromEntries(sessions.map((session) => [String(session._id), session]))
+    res.json({
+      attendance: attendance.map((row) => ({
+        ...row,
+        sessionDate: byId[String(row.sessionId)]?.date ?? null,
+        sessionTopic: byId[String(row.sessionId)]?.topic ?? null,
+      })),
+    })
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 router.get('/student/me', async (req, res) => {
   try {
     const filter = { studentId: req.user.userId }

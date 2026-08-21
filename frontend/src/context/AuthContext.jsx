@@ -31,14 +31,20 @@ export function AuthProvider({ children }) {
     return loggedIn
   }, [])
 
+  const register = useCallback(async (body) => {
+    const { user: created } = await authApi.register(body)
+    setUser(created)
+    return created
+  }, [])
+
   const logout = useCallback(async () => {
     await authApi.logout()
     setUser(null)
   }, [])
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, refreshUser }),
-    [user, loading, login, logout, refreshUser],
+    () => ({ user, loading, login, register, logout, refreshUser }),
+    [user, loading, login, register, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

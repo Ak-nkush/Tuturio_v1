@@ -20,5 +20,11 @@ export const env = {
   tutorEmail: process.env.TUTOR_EMAIL ?? 'tutor@tuturio.local',
   tutorPassword: process.env.TUTOR_PASSWORD ?? 'ChangeMeNow123456!',
   tutorName: process.env.TUTOR_NAME ?? 'Demo Tutor',
+  smtpHost: process.env.SMTP_HOST ?? '',
+  smtpPort: Number(process.env.SMTP_PORT ?? 587),
+  smtpSecure: process.env.SMTP_SECURE === 'true',
+  smtpUser: process.env.SMTP_USER ?? '',
+  smtpPassword: process.env.SMTP_PASSWORD ?? '',
+  emailFrom: process.env.EMAIL_FROM ?? 'Tuturio <noreply@tuturio.local>',
   isDev: process.env.NODE_ENV !== 'production',
 }

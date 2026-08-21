@@ -1,5 +1,6 @@
 import { Notification } from '../models/Notification.js'
 import { User } from '../models/User.js'
+import { emitToUser } from './socketService.js'
 
 const DEFAULT_PREFS = {
   messages: true,
@@ -21,7 +22,8 @@ export async function notify(userId, { title, message, type = 'system', link = n
   try {
     const user = await User.findOne({ userId })
     if (!wantsEvent(user, event)) return
-    await Notification.create({ userId, title, message, type, link })
+    const n = await Notification.create({ userId, title, message, type, link })
+    emitToUser(userId, 'notification:new', n)
   } catch (err) {
     console.error('Failed to create notification:', err.message)
   }
@@ -35,8 +37,12 @@ export async function notifyMany(userIds, payload) {
     const allowed = users.filter((u) => wantsEvent(u, payload.event ?? 'batch')).map((u) => u.userId)
     if (!allowed.length) return
     const { event, ...rest } = payload
-    await Notification.insertMany(allowed.map((userId) => ({ userId, ...rest })))
+    const docs = await Notification.insertMany(allowed.map((userId) => ({ userId, ...rest })))
+    for (const doc of docs) {
+      emitToUser(doc.userId, 'notification:new', doc)
+    }
   } catch (err) {
     console.error('Failed to create notifications:', err.message)
   }
 }
+

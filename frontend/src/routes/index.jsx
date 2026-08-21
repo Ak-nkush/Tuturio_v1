@@ -1,22 +1,33 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ProtectedRoute } from '../components/auth/ProtectedRoute'
 import { AuthProvider } from '../context/AuthContext'
+import { SocketProvider } from '../context/SocketContext'
 import { ForgotPasswordPage } from '../modules/auth/pages/ForgotPasswordPage'
 import { InvitePage } from '../modules/auth/pages/InvitePage'
 import { LoginPage } from '../modules/auth/pages/LoginPage'
 import { ResetPasswordPage } from '../modules/auth/pages/ResetPasswordPage'
+import { BatchDetailsPage } from '../modules/dashboard/pages/BatchDetailsPage'
+import { SessionWorkspacePage } from '../modules/dashboard/pages/SessionWorkspacePage'
+import { TutorChatPage } from '../modules/dashboard/pages/TutorChatPage'
+import { TutorNotificationsPage } from '../modules/dashboard/pages/TutorNotificationsPage'
+import { TutorSubjectsPage } from '../modules/dashboard/pages/TutorSubjectsPage'
 import {
   ParentDashboardPage,
   StudentDashboardPage,
-  TutorDashboardPage,
-} from '../modules/dashboard/pages/DashboardPages'
+  TutorAnalyticsPage,
+  TutorBatchesPage,
+  TutorDashboardShell,
+  TutorOverviewPage,
+  TutorStudentsPage,
+} from '../modules/dashboard/pages/DashboardAppPages'
 import { LandingPage } from '../pages/LandingPage'
 
 export function AppRoutes() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
+        <SocketProvider>
+          <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/auth/login" element={<LoginPage />} />
           <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
@@ -26,10 +37,19 @@ export function AppRoutes() {
             path="/tutor/dashboard"
             element={
               <ProtectedRoute allowedRoles={['tutor']}>
-                <TutorDashboardPage />
+                <TutorDashboardShell />
               </ProtectedRoute>
-            }
-          />
+            }>
+            <Route index element={<TutorOverviewPage />} />
+            <Route path="batches" element={<TutorBatchesPage />} />
+            <Route path="batches/:batchId" element={<BatchDetailsPage />} />
+            <Route path="subjects" element={<TutorSubjectsPage />} />
+            <Route path="students" element={<TutorStudentsPage />} />
+            <Route path="chat" element={<TutorChatPage />} />
+            <Route path="notifications" element={<TutorNotificationsPage />} />
+            <Route path="analytics" element={<TutorAnalyticsPage />} />
+            <Route path="sessions/:sessionId" element={<SessionWorkspacePage />} />
+          </Route>
           <Route
             path="/student/dashboard"
             element={
@@ -46,7 +66,8 @@ export function AppRoutes() {
               </ProtectedRoute>
             }
           />
-        </Routes>
+          </Routes>
+        </SocketProvider>
       </AuthProvider>
     </BrowserRouter>
   )

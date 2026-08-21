@@ -16,3 +16,11 @@ export const forgotPasswordRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many reset requests. Try again later.' },
 })
+
+export const messageRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many messages sent. Try again shortly.' },
+})

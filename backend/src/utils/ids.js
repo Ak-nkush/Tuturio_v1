@@ -2,6 +2,7 @@ import { customAlphabet } from 'nanoid'
 import { User } from '../models/User.js'
 import { Batch } from '../models/Batch.js'
 import { Invite } from '../models/Invite.js'
+import { Subject } from '../models/Subject.js'
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 6)
 
@@ -24,6 +25,10 @@ export async function generateBatchId() {
 
 export async function generateInviteId() {
   return nextPublicId('INV', Invite)
+}
+
+export async function generateSubjectId() {
+  return nextPublicId('SUB', Subject)
 }
 
 export function generateInviteCode() {

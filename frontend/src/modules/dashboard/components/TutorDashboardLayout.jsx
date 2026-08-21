@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { GrainOverlay } from '../../../components/layout/GrainOverlay'
 import { useAuth } from '../../../context/AuthContext'
 import '../../../styles/dashboard.css'
+import '../../../styles/auth.css'
 
 export function TutorDashboardLayout() {
   const { user, logout } = useAuth()
@@ -37,6 +38,13 @@ export function TutorDashboardLayout() {
           >
             <span className="nav-icon">⚄</span>
             Batches
+          </NavLink>
+          <NavLink 
+            to="/tutor/dashboard/subjects" 
+            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          >
+            <span className="nav-icon">▤</span>
+            Subjects
           </NavLink>
           <NavLink 
             to="/tutor/dashboard/students" 

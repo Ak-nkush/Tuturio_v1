@@ -20,8 +20,19 @@ async function getTransporter() {
     });
   }
 
-  // TODO: Configure production transporter (e.g. Resend, SendGrid)
-  return null;
+  if (!env.smtpHost || !env.smtpUser || !env.smtpPassword) {
+    throw new Error('SMTP_HOST, SMTP_USER, and SMTP_PASSWORD are required in production')
+  }
+
+  return nodemailer.createTransport({
+    host: env.smtpHost,
+    port: env.smtpPort,
+    secure: env.smtpSecure,
+    auth: {
+      user: env.smtpUser,
+      pass: env.smtpPassword,
+    },
+  })
 }
 
 export function generateResetToken() {
@@ -34,20 +45,20 @@ export function hashResetToken(token) {
 
 export async function sendPasswordResetEmail(email, resetUrl) {
   const transporter = await getTransporter()
-  if (env.isDev && transporter) {
-    const info = await transporter.sendMail({
-      from: '"Tuturio" <noreply@tuturio.local>',
-      to: email,
-      subject: 'Reset your password',
-      text: `Please reset your password by clicking here: ${resetUrl}`,
-      html: `<p>Please reset your password by clicking here: <a href="${resetUrl}">${resetUrl}</a></p>`,
-    })
+  const info = await transporter.sendMail({
+    from: env.emailFrom,
+    to: email,
+    subject: 'Reset your password',
+    text: `Please reset your password by clicking here: ${resetUrl}`,
+    html: `<p>Please reset your password by clicking here: <a href="${resetUrl}">${resetUrl}</a></p>`,
+  })
+  
+  if (env.isDev) {
     console.log('\n[DEV] Password reset link for', email)
     console.log('Preview URL:', nodemailer.getTestMessageUrl(info), '\n')
-    return
+  } else {
+    console.log(`[PROD] Password reset email sent to ${email}, messageId: ${info.messageId}`)
   }
-
-  console.log('[EMAIL STUB] Reset link would be sent to', email)
 }
 
 export async function sendInviteEmail(email, role, inviteUrl, batchName) {
@@ -61,18 +72,19 @@ export async function sendInviteEmail(email, role, inviteUrl, batchName) {
     <p><a href="${inviteUrl}">Click here to accept the invitation</a></p>
   `
 
-  if (env.isDev && transporter) {
-    const info = await transporter.sendMail({
-      from: '"Tuturio" <noreply@tuturio.local>',
-      to: email,
-      subject,
-      text,
-      html,
-    })
+  const info = await transporter.sendMail({
+    from: env.emailFrom,
+    to: email,
+    subject,
+    text,
+    html,
+  })
+
+  if (env.isDev) {
     console.log(`\n[DEV] Invite email sent to ${email} (${role})`)
     console.log('Preview URL:', nodemailer.getTestMessageUrl(info), '\n')
-    return
+  } else {
+    console.log(`[PROD] Invite email sent to ${email} (${role}), messageId: ${info.messageId}`)
   }
-
-  console.log(`[EMAIL STUB] Invite link for ${email} (${role}): ${inviteUrl}`)
 }
+
