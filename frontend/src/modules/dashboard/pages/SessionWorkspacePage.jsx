@@ -21,6 +21,9 @@ export function SessionWorkspacePage() {
   const [error, setError] = useState(null)
 
   const [attendance, setAttendance] = useState({})
+  const [savedAttendance, setSavedAttendance] = useState({})
+  const [attendanceRecords, setAttendanceRecords] = useState([])
+  const [correctionNote, setCorrectionNote] = useState('')
   const [activeTab, setActiveTab] = useState('attendance')
   const [saving, setSaving] = useState(false)
   const [successMsg, setSuccessMsg] = useState(null)
@@ -71,6 +74,8 @@ export function SessionWorkspacePage() {
         attMap[record.studentId] = record.status
       })
       setAttendance(attMap)
+      setSavedAttendance({ ...attMap })
+      setAttendanceRecords(attRes.attendance ?? [])
 
       const [annRes, resRes, progRes] = await Promise.all([
         announcementApi.getByBatch(res.session.batchId),
@@ -97,10 +102,20 @@ export function SessionWorkspacePage() {
       setSuccessMsg(null)
       setError(null)
 
-      const records = Object.keys(attendance).map((studentId) => ({
-        studentId,
-        status: attendance[studentId],
-      }))
+      const records = Object.keys(attendance).map((studentId) => {
+        const status = attendance[studentId]
+        const record = { studentId, status }
+        if (savedAttendance[studentId] && savedAttendance[studentId] !== status) {
+          record.note = correctionNote.trim()
+        }
+        return record
+      })
+      const needsNote = records.some((record) => record.note !== undefined)
+      if (needsNote && !correctionNote.trim()) {
+        setError('Add a correction note before changing attendance that was already saved.')
+        setSaving(false)
+        return
+      }
 
       await attendanceApi.save(sessionId, {
         batchId: session.batchId,
@@ -113,6 +128,8 @@ export function SessionWorkspacePage() {
       }
 
       setSuccessMsg('Attendance saved successfully')
+      setSavedAttendance({ ...attendance })
+      setCorrectionNote('')
       setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err) {
       setError(err.message || 'Failed to save attendance')
@@ -296,7 +313,7 @@ export function SessionWorkspacePage() {
                       <div key={student.studentId} className="attendance-row">
                         <div className="student-name">{student.name}</div>
                         <div className="attendance-actions">
-                          {['present', 'absent', 'late'].map((status) => (
+                          {['present', 'absent', 'late', 'excused'].map((status) => (
                             <button
                               key={status}
                               type="button"
@@ -316,10 +333,26 @@ export function SessionWorkspacePage() {
                             </button>
                           )}
                         </div>
+                        {attendanceRecords.find((row) => row.studentId === student.studentId)?.corrections?.length > 0 && (
+                          <p className="text-muted text-sm">
+                            Last correction: {attendanceRecords.find((row) => row.studentId === student.studentId).corrections.at(-1).note}
+                            {' · '}
+                            {new Date(attendanceRecords.find((row) => row.studentId === student.studentId).corrections.at(-1).changedAt).toLocaleString()}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
 
+                  <div className="auth-field mt-4">
+                    <label htmlFor="correction-note">Correction note (required when changing saved attendance)</label>
+                    <input
+                      id="correction-note"
+                      value={correctionNote}
+                      onChange={(e) => setCorrectionNote(e.target.value)}
+                      placeholder="Why this status is being changed"
+                    />
+                  </div>
                   <div className="mt-6 text-right">
                     <button type="button" onClick={handleSaveAttendance} className="btn-primary" disabled={saving}>
                       {saving ? 'Saving...' : 'Save Attendance'}
@@ -364,7 +397,7 @@ export function SessionWorkspacePage() {
                   {resources.map((r) => (
                     <li key={r._id}>
                       {r.type === 'file' ? (
-                        <a href={r.url} target="_blank" rel="noreferrer">
+                        <a href={r.downloadUrl} target="_blank" rel="noreferrer">
                           {r.title}
                         </a>
                       ) : (

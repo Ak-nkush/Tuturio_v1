@@ -11,6 +11,8 @@ const progressSchema = new Schema(
     maxScore: { type: Number, required: true },
     remark: { type: String, trim: true },
     sessionId: { type: String, default: null },
+    archived: { type: Boolean, default: false },
+    createdBy: { type: String, default: null },
     date: { type: Date, default: Date.now },
   },
   { timestamps: true }

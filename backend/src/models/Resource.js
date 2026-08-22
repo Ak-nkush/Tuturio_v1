@@ -6,7 +6,11 @@ const resourceSchema = new Schema(
     batchId: { type: String, required: true },
     title: { type: String, required: true, trim: true },
     type: { type: String, enum: ['file', 'link'], required: true },
-    url: { type: String, required: true }, // URL to the file or the external link
+    url: { type: String, default: null }, // External URL for links only
+    storageKey: { type: String, default: null },
+    fileName: { type: String, default: null },
+    mimeType: { type: String, default: null },
+    sizeBytes: { type: Number, default: null },
   },
   { timestamps: true }
 )

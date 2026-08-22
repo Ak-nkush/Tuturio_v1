@@ -220,6 +220,7 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       date,
       topic,
       status: 'scheduled',
+      oneOff: true,
     })
 
     res.status(201).json({ session })

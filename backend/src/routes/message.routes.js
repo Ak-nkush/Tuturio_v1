@@ -1,50 +1,26 @@
 import { Router } from 'express'
-import multer from 'multer'
-import path from 'path'
-import fs from 'fs'
-import { fileURLToPath } from 'url'
 import { Message } from '../models/Message.js'
 import { User } from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
 import { messageRateLimiter } from '../middleware/rateLimit.js'
-import { areRelated } from '../services/relationshipService.js'
+import { areRelated, conversationTypeForRoles } from '../services/relationshipService.js'
 import { notify } from '../services/notificationService.js'
 import { emitToUser } from '../services/socketService.js'
+import { createUpload, SAFE_DOCUMENT_TYPES } from '../middleware/uploads.js'
+import { storeFile } from '../services/storageService.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const uploadsDir = path.join(__dirname, '../../uploads/messages')
+const upload = createUpload({ allowedTypes: SAFE_DOCUMENT_TYPES, maxFileSize: 10 * 1024 * 1024, maxFiles: 3 })
 
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true })
+function publicMessage(message) {
+  const value = message.toObject ? message.toObject() : message
+  return {
+    ...value,
+    attachments: (value.attachments ?? []).map((file, index) => ({
+      ...file,
+      url: `/api/files/messages/${value._id}/${index}`,
+    })),
+  }
 }
-
-const ALLOWED_TYPES = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain',
-])
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `${Date.now()}-${safe}`)
-  },
-})
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_TYPES.has(file.mimetype)) cb(null, true)
-    else cb(new Error('File type not allowed'))
-  },
-})
 
 function optionalFiles(req, res, next) {
   const ct = String(req.headers['content-type'] ?? '')
@@ -61,10 +37,8 @@ const router = Router()
 
 router.use(requireAuth)
 
-// Contacts the current user is allowed to talk to:
-// - tutor: all students + linked parents across their batches
-// - student: their tutor(s), classmates, linked parents
-// - parent: tutors of their children's batches + their children
+// Contacts are limited to the tutor and their active students/parents.
+// Students and parents never appear as contacts for each other.
 router.get('/contacts', async (req, res) => {
   try {
     const me = await User.findOne({ userId: req.user.userId })
@@ -82,16 +56,24 @@ router.get('/contacts', async (req, res) => {
     const ids = new Set()
     for (const batch of batches) {
       if (batch.tutorId !== me.userId) ids.add(batch.tutorId)
+      if (me.role !== 'tutor') continue
       for (const e of batch.enrollment) {
         if (e.status !== 'active') continue
-        if (e.studentId !== me.userId) ids.add(e.studentId)
+        ids.add(e.studentId)
         if (e.parentId && e.parentId !== me.userId) ids.add(e.parentId)
       }
     }
-    if (me.role === 'parent') ids.add(...me.linkedStudentIds)
 
     const users = await User.find({ userId: { $in: [...ids] }, status: 'active' })
-    res.json({ contacts: users.map((u) => ({ userId: u.userId, name: u.name, role: u.role })) })
+    const meRole = me.role
+    res.json({
+      contacts: users.map((u) => ({
+        userId: u.userId,
+        name: u.name,
+        role: u.role,
+        type: conversationTypeForRoles(meRole, u.role),
+      })),
+    })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -125,10 +107,19 @@ router.get('/conversations', async (req, res) => {
 
     const contacts = [...byContact.values()]
     const users = await User.find({ userId: { $in: contacts.map((c) => c.userId) } })
-    const nameById = Object.fromEntries(users.map((u) => [u.userId, u.name]))
-    for (const c of contacts) c.name = nameById[c.userId] ?? c.userId
+    const byId = Object.fromEntries(users.map((u) => [u.userId, u]))
+    const me = await User.findOne({ userId: req.user.userId })
+    const related = []
+    for (const c of contacts) {
+      if (!(await areRelated(req.user.userId, c.userId))) continue
+      const other = byId[c.userId]
+      c.name = other?.name ?? c.userId
+      c.role = other?.role ?? null
+      c.type = conversationTypeForRoles(me?.role, other?.role)
+      related.push(c)
+    }
 
-    res.json({ conversations: contacts })
+    res.json({ conversations: related })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -156,7 +147,7 @@ router.get('/:userId', async (req, res) => {
       .sort({ createdAt: 1 })
       .limit(100)
 
-    res.json({ messages })
+    res.json({ messages: messages.map(publicMessage) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -186,10 +177,19 @@ router.post('/', messageRateLimiter, optionalFiles, async (req, res) => {
 
     const sender = await User.findOne({ userId: req.user.userId })
 
-    const attachments = files.map((file) => ({
-      url: `/uploads/messages/${file.filename}`,
-      filename: file.originalname,
-      mimeType: file.mimetype,
+    const attachments = await Promise.all(files.map(async (file) => {
+      const stored = await storeFile({
+        buffer: file.buffer,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        folder: `messages/${req.user.userId}`,
+      })
+      return {
+        storageKey: stored.storageKey,
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+      }
     }))
 
     const message = await Message.create({
@@ -199,18 +199,26 @@ router.post('/', messageRateLimiter, optionalFiles, async (req, res) => {
       attachments,
     })
 
+    const chatLink =
+      receiver.role === 'parent'
+        ? '/parent/dashboard?tab=chat'
+        : receiver.role === 'student'
+          ? '/student/dashboard?tab=chat'
+          : '/tutor/dashboard/chat'
     await notify(receiverId, {
       title: 'New message',
       message: `You have a new message from ${sender?.name ?? 'someone'}`,
       type: 'system',
       event: 'messages',
+      link: chatLink,
     })
 
     // Real-time Socket.io emissions
-    emitToUser(receiverId, 'message:received', message)
-    emitToUser(req.user.userId, 'message:sent', message)
+    const safeMessage = publicMessage(message)
+    emitToUser(receiverId, 'message:received', safeMessage)
+    emitToUser(req.user.userId, 'message:sent', safeMessage)
 
-    res.status(201).json({ message })
+    res.status(201).json({ message: safeMessage })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })

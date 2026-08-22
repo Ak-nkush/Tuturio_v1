@@ -8,9 +8,10 @@ const messageSchema = new Schema(
     attachments: {
       type: [
         {
-          url: { type: String, required: true },
+          storageKey: { type: String, required: true },
           filename: { type: String, required: true },
           mimeType: { type: String, default: '' },
+          sizeBytes: { type: Number, default: null },
         },
       ],
       default: [],

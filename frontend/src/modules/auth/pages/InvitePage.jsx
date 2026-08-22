@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AuthLayout } from '../../../components/auth/AuthLayout'
 import { PasswordField } from '../../../components/auth/PasswordField'
 import { useAuth, dashboardPath } from '../../../context/AuthContext'
-import { inviteApi } from '../../../lib/api'
+import { inviteApi, validatePassword } from '../../../lib/api'
 
 const reasonMessages = {
   expired: 'This invite has expired — ask your tutor for a new one.',
@@ -15,7 +15,7 @@ const reasonMessages = {
 export function InvitePage() {
   const { code = '' } = useParams()
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, logout, refreshUser } = useAuth()
 
   const [inviteState, setInviteState] = useState({ status: 'loading' })
   const [wrongRole, setWrongRole] = useState(null)
@@ -51,6 +51,13 @@ export function InvitePage() {
   async function handleRedeem(e, asExistingUser = false) {
     e.preventDefault()
     setError('')
+    if (!asExistingUser) {
+      const passwordError = validatePassword(password)
+      if (passwordError) {
+        setError(passwordError)
+        return
+      }
+    }
     setSubmitting(true)
 
     try {
@@ -60,11 +67,13 @@ export function InvitePage() {
 
       if (asExistingUser && user) {
         const res = await inviteApi.redeem(code, {})
+        await refreshUser()
         navigate(dashboardPath(res.user.role), { replace: true })
         return
       }
 
       const res = await inviteApi.redeem(code, body)
+      await refreshUser()
       navigate(dashboardPath(res.user.role), { replace: true })
     } catch (err) {
       if (err?.reason === 'wrong_role') {

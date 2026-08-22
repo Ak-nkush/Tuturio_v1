@@ -7,8 +7,19 @@ import { requireAuth, requireRole } from '../middleware/auth.js'
 import { ATTENDANCE_STATUSES, validObjectIdParam } from '../utils/validate.js'
 import { notifyMany } from '../services/notificationService.js'
 
-const router = Router()
+async function withSessionMeta(records) {
+  const list = records.map((row) => (row.toObject ? row.toObject() : row))
+  const sessionIds = list.map((row) => row.sessionId).filter(Boolean)
+  const sessions = await Session.find({ _id: { $in: sessionIds } }).select('date topic batchId')
+  const byId = Object.fromEntries(sessions.map((session) => [String(session._id), session]))
+  return list.map((row) => ({
+    ...row,
+    sessionDate: byId[String(row.sessionId)]?.date ?? null,
+    sessionTopic: byId[String(row.sessionId)]?.topic ?? null,
+  }))
+}
 
+const router = Router()
 router.use(requireAuth)
 
 router.get('/session/:sessionId', requireRole('tutor'), validObjectIdParam('sessionId'), async (req, res) => {
@@ -59,8 +70,8 @@ router.get('/student/me', async (req, res) => {
     const filter = { studentId: req.user.userId }
     if (req.query.batchId) filter.batchId = req.query.batchId
 
-    const attendanceRecords = await Attendance.find(filter)
-    res.json({ attendance: attendanceRecords })
+    const attendanceRecords = await Attendance.find(filter).sort({ createdAt: -1 })
+    res.json({ attendance: await withSessionMeta(attendanceRecords) })
   } catch (error) {
     console.error('Error fetching student attendance:', error)
     res.status(500).json({ error: 'Server error' })
@@ -72,13 +83,40 @@ router.get('/parent/students', async (req, res) => {
     const parent = await User.findOne({ userId: req.user.userId })
     if (!parent) return res.status(404).json({ error: 'User not found' })
 
-    const filter = { studentId: { $in: parent.linkedStudentIds } }
+    const requested = req.query.studentId ? String(req.query.studentId) : null
+    if (requested && !parent.linkedStudentIds.includes(requested)) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    const filter = { studentId: requested ? requested : { $in: parent.linkedStudentIds } }
     if (req.query.batchId) filter.batchId = req.query.batchId
 
-    const attendanceRecords = await Attendance.find(filter)
-    res.json({ attendance: attendanceRecords })
+    const attendanceRecords = await Attendance.find(filter).sort({ createdAt: -1 })
+    res.json({ attendance: await withSessionMeta(attendanceRecords) })
   } catch (error) {
     console.error('Error fetching parent attendance:', error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+router.get('/student/:studentId', async (req, res) => {
+  try {
+    const studentId = req.params.studentId
+    if (req.user.role === 'student' && req.user.userId !== studentId) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+    if (req.user.role === 'parent') {
+      const parent = await User.findOne({ userId: req.user.userId })
+      if (!parent?.linkedStudentIds.includes(studentId)) return res.status(403).json({ error: 'Forbidden' })
+    }
+    if (req.user.role === 'tutor') {
+      const owns = await Batch.exists({ tutorId: req.user.userId, 'enrollment.studentId': studentId })
+      if (!owns) return res.status(403).json({ error: 'This student is not in your batches' })
+    }
+
+    const attendance = await Attendance.find({ studentId }).sort({ createdAt: -1 }).limit(200)
+    res.json({ attendance: await withSessionMeta(attendance) })
+  } catch (error) {
     res.status(500).json({ error: 'Server error' })
   }
 })
@@ -117,36 +155,93 @@ router.post('/session/:sessionId', requireRole('tutor'), validObjectIdParam('ses
     }
 
     if (records.length > 0) {
-      await Attendance.bulkWrite(
-        records.map((record) => ({
-          updateOne: {
-            filter: { sessionId, studentId: record.studentId },
-            update: { $set: { batchId: session.batchId, status: record.status } },
-            upsert: true,
-          },
-        })),
-      )
+      for (const record of records) {
+        const existing = await Attendance.findOne({ sessionId, studentId: record.studentId })
+        if (existing && existing.status !== record.status) {
+          if (!String(record.note ?? '').trim()) {
+            return res.status(400).json({ error: 'A correction note is required when changing saved attendance' })
+          }
+          existing.corrections.push({
+            previousStatus: existing.status,
+            newStatus: record.status,
+            note: String(record.note).trim(),
+            changedBy: req.user.userId,
+            changedAt: new Date(),
+          })
+          existing.status = record.status
+          existing.markedBy = req.user.userId
+          existing.markedAt = new Date()
+          await existing.save()
+        } else if (!existing) {
+          await Attendance.create({
+            sessionId,
+            studentId: record.studentId,
+            batchId: session.batchId,
+            status: record.status,
+            markedBy: req.user.userId,
+            markedAt: new Date(),
+          })
+        }
+      }
 
       // Notify affected students + their linked parents
       const enrolledRows = batch.enrollment.filter((e) =>
         records.some((r) => r.studentId === e.studentId),
       )
-      const recipients = new Set()
-      for (const row of enrolledRows) {
-        recipients.add(row.studentId)
-        if (row.parentId) recipients.add(row.parentId)
-      }
-      await notifyMany([...recipients], {
+      await notifyMany(enrolledRows.map((row) => row.studentId), {
         title: 'Attendance recorded',
         message: `Attendance was marked for "${batch.name}"`,
         type: 'student',
         event: 'attendance',
+        link: '/student/dashboard?tab=work',
+      })
+      await notifyMany(enrolledRows.map((row) => row.parentId).filter(Boolean), {
+        title: 'Attendance recorded',
+        message: `Attendance was marked for "${batch.name}"`,
+        type: 'student',
+        event: 'attendance',
+        link: '/parent/dashboard?tab=work',
       })
     }
 
     res.json({ message: 'Attendance saved successfully' })
   } catch (error) {
     console.error('Error saving attendance:', error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+router.patch('/session/:sessionId/student/:studentId', requireRole('tutor'), validObjectIdParam('sessionId'), async (req, res) => {
+  try {
+    const session = await Session.findOne({ _id: req.params.sessionId, tutorId: req.user.userId })
+    if (!session) return res.status(404).json({ error: 'Session not found or unauthorized' })
+
+    const status = String(req.body.status ?? '')
+    if (!ATTENDANCE_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${ATTENDANCE_STATUSES.join(', ')}` })
+    }
+
+    const record = await Attendance.findOne({ sessionId: req.params.sessionId, studentId: req.params.studentId })
+    if (!record) return res.status(404).json({ error: 'Attendance record not found' })
+
+    if (record.status !== status) {
+      const note = String(req.body.note ?? '').trim()
+      if (!note) return res.status(400).json({ error: 'A correction note is required' })
+      record.corrections.push({
+        previousStatus: record.status,
+        newStatus: status,
+        note,
+        changedBy: req.user.userId,
+        changedAt: new Date(),
+      })
+      record.status = status
+      record.markedBy = req.user.userId
+      record.markedAt = new Date()
+      await record.save()
+    }
+
+    res.json({ attendance: record })
+  } catch (error) {
     res.status(500).json({ error: 'Server error' })
   }
 })

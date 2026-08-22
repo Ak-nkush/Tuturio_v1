@@ -74,6 +74,13 @@ export function TutorDashboardLayout() {
             <span className="nav-icon">◈</span>
             Analytics
           </NavLink>
+          <NavLink
+            to="/account/settings"
+            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          >
+            <span className="nav-icon">⚙</span>
+            Settings
+          </NavLink>
         </nav>
 
         <div className="sidebar-footer">

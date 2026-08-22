@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 
-export const PASSWORD_MIN_LENGTH = 16
+export const PASSWORD_MIN_LENGTH = 8
 
 export function validatePassword(password) {
   if (password.length < PASSWORD_MIN_LENGTH) {

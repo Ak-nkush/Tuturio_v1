@@ -20,4 +20,4 @@ export function validObjectIdParam(paramName) {
 }
 
 export const SESSION_STATUSES = ['scheduled', 'active', 'completed', 'cancelled']
-export const ATTENDANCE_STATUSES = ['present', 'absent', 'late']
+export const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'excused']

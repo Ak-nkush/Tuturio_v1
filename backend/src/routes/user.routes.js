@@ -1,37 +1,11 @@
 import { Router } from 'express'
-import multer from 'multer'
-import path from 'path'
-import fs from 'fs'
-import { fileURLToPath } from 'url'
 import { User, publicUser } from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
 import { escapeRegex } from '../utils/validate.js'
+import { createUpload, SAFE_PROFILE_IMAGE_TYPES } from '../middleware/uploads.js'
+import { deleteStoredFile, storeFile } from '../services/storageService.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const uploadsDir = path.join(__dirname, '../../uploads/profiles')
-
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true })
-}
-
-const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `${Date.now()}-${safe}`)
-  },
-})
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_TYPES.has(file.mimetype)) cb(null, true)
-    else cb(new Error('File type not allowed. Only JPEG, PNG, WEBP.'))
-  },
-})
+const upload = createUpload({ allowedTypes: SAFE_PROFILE_IMAGE_TYPES, maxFileSize: 5 * 1024 * 1024 })
 
 const router = Router()
 
@@ -78,14 +52,16 @@ router.post('/profile-picture', upload.single('file'), async (req, res) => {
     const user = await User.findOne({ userId: req.user.userId })
     if (!user) return res.status(404).json({ error: 'User not found' })
 
-    // Optional: remove old profile picture if it exists and is local
-    if (user.profilePicture && user.profilePicture.startsWith('/uploads/profiles/')) {
-      const oldFilePath = path.join(__dirname, '../..', user.profilePicture)
-      if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath)
-    }
-
-    user.profilePicture = `/uploads/profiles/${req.file.filename}`
+    const previous = user.profilePicture
+    const stored = await storeFile({
+      buffer: req.file.buffer,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      folder: `profiles/${user.userId}`,
+    })
+    user.profilePicture = stored.storageKey
     await user.save()
+    await deleteStoredFile(previous)
 
     res.json({ user: publicUser(user) })
   } catch (error) {

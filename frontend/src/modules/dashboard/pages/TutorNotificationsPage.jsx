@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { notificationApi } from '../../../lib/api'
 import '../../../styles/dashboard.css'
 
@@ -10,7 +11,7 @@ const PREF_LABELS = {
   batch: 'Other batch events',
 }
 
-export function TutorNotificationsPage() {
+export function TutorNotificationsPage({ embedded = false }) {
   const [items, setItems] = useState([])
   const [prefs, setPrefs] = useState(null)
   const [error, setError] = useState('')
@@ -43,16 +44,25 @@ export function TutorNotificationsPage() {
 
   return (
     <div>
-      <div className="dashboard-header section-heading">
-        <div>
-          <span className="eyebrow">Alerts</span>
-          <h1>Notifications</h1>
-          <p>View events and choose what you want to receive.</p>
+      {!embedded && (
+        <div className="dashboard-header section-heading">
+          <div>
+            <span className="eyebrow">Alerts</span>
+            <h1>Notifications</h1>
+            <p>View events and choose what you want to receive.</p>
+          </div>
+          <button type="button" className="btn-outline" onClick={markAll}>
+            Mark all read
+          </button>
         </div>
-        <button type="button" className="btn-outline" onClick={markAll}>
-          Mark all read
-        </button>
-      </div>
+      )}
+      {embedded && (
+        <div className="button-row mb-6">
+          <button type="button" className="btn-outline" onClick={markAll}>
+            Mark all read
+          </button>
+        </div>
+      )}
       {error && <div className="alert error">{error}</div>}
 
       <section className="premium-card mb-6">
@@ -81,6 +91,11 @@ export function TutorNotificationsPage() {
                   <strong>{n.title}</strong>
                   <p>{n.message}</p>
                   <small className="text-muted">{new Date(n.createdAt).toLocaleString()}</small>
+                  {n.link && (
+                    <p>
+                      <Link to={n.link}>Open</Link>
+                    </p>
+                  )}
                 </div>
                 {!n.isRead && (
                   <button type="button" className="btn-outline btn-sm" onClick={() => markOne(n._id)}>

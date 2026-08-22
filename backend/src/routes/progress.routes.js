@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { Progress } from '../models/Progress.js'
 import { Batch } from '../models/Batch.js'
+import { Session } from '../models/Session.js'
 import { User } from '../models/User.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { validObjectIdParam } from '../utils/validate.js'
@@ -30,8 +31,22 @@ router.get('/batch/:batchId', async (req, res) => {
       }
     }
 
-    const filter = { batchId: req.params.batchId }
-    if (req.query.studentId) filter.studentId = String(req.query.studentId)
+    const filter = { batchId: req.params.batchId, archived: { $ne: true } }
+    if (req.user.role === 'student') {
+      filter.studentId = req.user.userId
+    } else if (req.user.role === 'parent') {
+      const parent = await User.findOne({ userId: req.user.userId })
+      const allowedIds = parent?.linkedStudentIds ?? []
+      const requested = req.query.studentId ? String(req.query.studentId) : null
+      if (requested) {
+        if (!allowedIds.includes(requested)) return res.status(403).json({ error: 'Forbidden' })
+        filter.studentId = requested
+      } else {
+        filter.studentId = { $in: allowedIds }
+      }
+    } else if (req.query.studentId) {
+      filter.studentId = String(req.query.studentId)
+    }
 
     const entries = await Progress.find(filter).sort({ date: -1 }).limit(100)
     res.json({ progress: entries })
@@ -50,7 +65,9 @@ router.get('/tutor/student/:studentId', requireRole('tutor'), async (req, res) =
     })
     if (!owns) return res.status(403).json({ error: 'This student is not in your batches' })
 
-    const progress = await Progress.find({ studentId, tutorId: req.user.userId }).sort({ date: -1 }).limit(100)
+    const filter = { studentId, tutorId: req.user.userId }
+    if (req.query.includeArchived !== '1') filter.archived = { $ne: true }
+    const progress = await Progress.find(filter).sort({ date: -1 }).limit(100)
     res.json({ progress })
   } catch (error) {
     console.error(error)
@@ -60,7 +77,7 @@ router.get('/tutor/student/:studentId', requireRole('tutor'), async (req, res) =
 
 router.get('/student/me', async (req, res) => {
   try {
-    const filter = { studentId: req.user.userId }
+    const filter = { studentId: req.user.userId, archived: { $ne: true } }
     if (req.query.batchId) filter.batchId = req.query.batchId
 
     const progress = await Progress.find(filter).sort({ createdAt: -1 })
@@ -76,7 +93,7 @@ router.get('/parent/students', async (req, res) => {
     const parent = await User.findOne({ userId: req.user.userId })
     if (!parent) return res.status(404).json({ error: 'User not found' })
 
-    const filter = { studentId: { $in: parent.linkedStudentIds } }
+    const filter = { studentId: { $in: parent.linkedStudentIds }, archived: { $ne: true } }
     if (req.query.batchId) filter.batchId = req.query.batchId
 
     const progress = await Progress.find(filter).sort({ createdAt: -1 })
@@ -89,7 +106,11 @@ router.get('/parent/students', async (req, res) => {
 
 router.get('/session/:sessionId', requireRole('tutor'), validObjectIdParam('sessionId'), async (req, res) => {
   try {
-    const entries = await Progress.find({ sessionId: req.params.sessionId }).sort({ createdAt: -1 })
+    const session = await Session.findById(req.params.sessionId)
+    if (!session || session.tutorId !== req.user.userId) {
+      return res.status(404).json({ error: 'Progress entry not found' })
+    }
+    const entries = await Progress.find({ sessionId: req.params.sessionId, archived: { $ne: true } }).sort({ createdAt: -1 })
     res.json({ progress: entries })
   } catch (error) {
     console.error(error)
@@ -146,6 +167,8 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       maxScore,
       remark,
       sessionId: req.body.sessionId ? String(req.body.sessionId) : null,
+      createdBy: req.user.userId,
+      archived: false,
     })
 
     const student = await User.findOne({ userId: studentId })
@@ -166,12 +189,23 @@ router.post('/', requireRole('tutor'), async (req, res) => {
 
 async function notifyManySafe(recipients, batchName, topic) {
   const { notifyMany } = await import('../services/notificationService.js')
-  await notifyMany(recipients, {
+  const [studentId, parentId] = recipients
+  await notifyMany([studentId], {
     title: 'Progress updated',
     message: `New progress entry for "${batchName}": ${topic}`,
     type: 'student',
     event: 'progress',
+    link: '/student/dashboard?tab=work',
   })
+  if (parentId) {
+    await notifyMany([parentId], {
+      title: 'Progress updated',
+      message: `New progress entry for "${batchName}": ${topic}`,
+      type: 'student',
+      event: 'progress',
+      link: '/parent/dashboard?tab=work',
+    })
+  }
 }
 
 router.patch('/:id', requireRole('tutor'), validObjectIdParam('id'), async (req, res) => {
@@ -211,8 +245,9 @@ router.delete('/:id', requireRole('tutor'), validObjectIdParam('id'), async (req
     if (!entry || entry.tutorId !== req.user.userId) {
       return res.status(404).json({ error: 'Progress entry not found' })
     }
-    await entry.deleteOne()
-    res.json({ message: 'Deleted' })
+    entry.archived = true
+    await entry.save()
+    res.json({ message: 'Archived', progress: entry })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })

@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react'
-import { Link, Outlet } from 'react-router-dom'
+import { Link, Outlet, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import { useSocket } from '../../../context/SocketContext'
 import {
   analyticsApi,
+  announcementApi,
   attendanceApi,
   batchApi,
   messageApi,
   notificationApi,
   progressApi,
+  resourceApi,
   sessionApi,
+  formatSchedule,
+  studentRosterState,
   userApi,
 } from '../../../lib/api'
+import { TutorChatPage } from './TutorChatPage'
+import { TutorNotificationsPage } from './TutorNotificationsPage'
 import { BatchFormModal, ScheduleClassModal } from '../components/BatchFormModal'
 import { TutorDashboardLayout } from '../components/TutorDashboardLayout'
 import '../../../styles/dashboard.css'
@@ -307,10 +314,11 @@ export function TutorBatchesPage() {
                   <strong>Subjects:</strong> {(batch.subjects ?? []).join(', ') || 'Not set'}
                 </p>
                 <p>
-                  <strong>Students:</strong> {batch.enrollment?.filter((e) => e.status === 'active').length ?? 0}
+                  <strong>Students:</strong> {batch.activeCount ?? batch.enrollment?.filter((e) => e.status === 'active').length ?? 0} active
+                  {(batch.pendingCount ?? 0) > 0 ? ` · ${batch.pendingCount} pending` : ''}
                 </p>
                 <p>
-                  <strong>Schedule:</strong> {batch.schedule?.time ?? 'Not set'}
+                  <strong>Schedule:</strong> {formatSchedule(batch.schedule)}
                 </p>
               </div>
               <div className="button-row mt-4">
@@ -379,7 +387,7 @@ export function TutorStudentsPage() {
   async function openArchive(student) {
     try {
       const [progress, attendance] = await Promise.all([
-        progressApi.tutorStudent(student.studentId),
+        progressApi.tutorStudent(student.studentId, true),
         attendanceApi.tutorStudent(student.studentId),
       ])
       setArchiveView({
@@ -392,10 +400,7 @@ export function TutorStudentsPage() {
     }
   }
 
-  const filtered = students.filter((student) => {
-    const archived = student.status === 'removed' || student.accountStatus === 'archived'
-    return tab === 'archived' ? archived : !archived
-  })
+  const filtered = students.filter((student) => studentRosterState(student).key === tab)
 
   return (
     <div>
@@ -405,16 +410,33 @@ export function TutorStudentsPage() {
         <p>Remove a student from a batch or pause their login. Historical data is kept.</p>
       </div>
       <div className="button-row mb-6">
-        <button type="button" className={`btn-outline ${tab === 'active' ? 'btn-primary' : ''}`} onClick={() => setTab('active')}>
-          Active
-        </button>
-        <button type="button" className={`btn-outline ${tab === 'archived' ? 'btn-primary' : ''}`} onClick={() => setTab('archived')}>
-          Archived
-        </button>
+        {[
+          ['active', 'Active'],
+          ['pending', 'Pending'],
+          ['removed', 'Removed'],
+          ['archived', 'Archived'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={`btn-outline ${tab === key ? 'btn-primary' : ''}`}
+            onClick={() => setTab(key)}
+          >
+            {label} ({students.filter((student) => studentRosterState(student).key === key).length})
+          </button>
+        ))}
       </div>
       {error && <ErrorState message={error} />}
       {filtered.length === 0 ? (
-        <div className="empty-state">{tab === 'archived' ? 'No archived students.' : 'No students enrolled yet.'}</div>
+        <div className="empty-state">
+          {tab === 'pending'
+            ? 'No pending invites.'
+            : tab === 'removed'
+              ? 'No removed students.'
+              : tab === 'archived'
+                ? 'No archived students.'
+                : 'No students enrolled yet.'}
+        </div>
       ) : (
         <div className="premium-table-container">
           <table className="premium-table">
@@ -436,18 +458,16 @@ export function TutorStudentsPage() {
                   <td>{student.batchName}</td>
                   <td>{student.parentName ?? 'Not linked'}</td>
                   <td>
-                    {student.status === 'removed'
-                      ? 'Removed from batch'
-                      : student.accountStatus === 'archived'
-                        ? 'Access paused'
-                        : 'Active'}
+                    <span className={`roster-badge ${studentRosterState(student).key}`}>
+                      {studentRosterState(student).label}
+                    </span>
                   </td>
                   <td>
                     <div className="button-row">
                       <button type="button" className="btn-outline btn-sm" onClick={() => openArchive(student)}>
                         Records
                       </button>
-                      {student.status !== 'removed' && (
+                      {student.status !== 'removed' && student.status !== 'pending' && (
                         <>
                           <button type="button" className="btn-outline btn-sm" onClick={() => toggleAccess(student)}>
                             {student.accountStatus === 'archived' ? 'Restore access' : 'Pause access'}
@@ -649,59 +669,306 @@ export function TutorAnalyticsPage() {
   )
 }
 
+const LEARNER_TABS = ['home', 'work', 'materials', 'chat', 'alerts']
+
 function LearnerDashboard({ role }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const socket = useSocket()
   const [batches, setBatches] = useState([])
   const [sessions, setSessions] = useState([])
+  const [children, setChildren] = useState([])
+  const [pendingInvites, setPendingInvites] = useState([])
+  const [attendance, setAttendance] = useState([])
+  const [progress, setProgress] = useState([])
+  const [notices, setNotices] = useState([])
+  const [resources, setResources] = useState([])
+  const [overview, setOverview] = useState(null)
+  const [resourceQuery, setResourceQuery] = useState('')
+  const [unreadNotes, setUnreadNotes] = useState(0)
+  const [unreadChats, setUnreadChats] = useState(0)
   const [error, setError] = useState('')
+
+  const tabParam = searchParams.get('tab') || 'home'
+  const tab = LEARNER_TABS.includes(tabParam) ? tabParam : 'home'
+  const childId = searchParams.get('child') || ''
+
+  function setTab(next) {
+    setSearchParams((prev) => {
+      const nextParams = new URLSearchParams(prev)
+      nextParams.set('tab', next)
+      return nextParams
+    }, { replace: true })
+  }
+
+  function setChildId(id) {
+    setSearchParams((prev) => {
+      const nextParams = new URLSearchParams(prev)
+      if (id) nextParams.set('child', id)
+      else nextParams.delete('child')
+      return nextParams
+    }, { replace: true })
+  }
+
+  async function refreshBadges() {
+    const [notes, chats] = await Promise.all([
+      notificationApi.list().catch(() => ({ notifications: [] })),
+      messageApi.conversations().catch(() => ({ conversations: [] })),
+    ])
+    setUnreadNotes((notes.notifications ?? []).filter((n) => !n.isRead).length)
+    setUnreadChats((chats.conversations ?? []).reduce((sum, c) => sum + (c.unread ?? 0), 0))
+  }
+
   useEffect(() => {
-    const batchesRequest = role === 'parent' ? batchApi.getParentEnrolled() : batchApi.getStudentEnrolled()
-    const sessionsRequest = role === 'parent' ? sessionApi.upcomingForParent() : sessionApi.upcomingForStudent()
-    Promise.all([batchesRequest, sessionsRequest])
-      .then(([batchRes, sessionRes]) => {
-        setBatches(batchRes.batches ?? [])
-        setSessions(sessionRes.sessions ?? [])
-      })
-      .catch((err) => setError(err.message))
-  }, [role])
-  const title = role === 'parent' ? 'Parent dashboard' : 'My learning'
+    refreshBadges().catch(() => {})
+  }, [role, tab])
+
+  useEffect(() => {
+    if (!socket) return
+    const bump = () => refreshBadges().catch(() => {})
+    socket.on('message:received', bump)
+    socket.on('notification:new', bump)
+    return () => {
+      socket.off('message:received', bump)
+      socket.off('notification:new', bump)
+    }
+  }, [socket])
+
+  useEffect(() => {
+    async function load() {
+      const batchesRequest = role === 'parent' ? batchApi.getParentEnrolled() : batchApi.getStudentEnrolled()
+      const sessionsRequest = role === 'parent' ? sessionApi.upcomingForParent() : sessionApi.upcomingForStudent()
+      const overviewRequest = role === 'parent' ? analyticsApi.parent() : analyticsApi.student()
+      const [batchRes, sessionRes, overviewRes] = await Promise.all([batchesRequest, sessionsRequest, overviewRequest])
+      const nextBatches = batchRes.batches ?? []
+      setBatches(nextBatches)
+      setSessions(sessionRes.sessions ?? [])
+      setOverview(overviewRes)
+
+      let selectedChild = childId
+      if (role === 'parent') {
+        const kids = await batchApi.getParentStudents()
+        const list = kids.students ?? []
+        setChildren(list)
+        setPendingInvites(kids.pending ?? [])
+        if (!selectedChild && list[0]) {
+          selectedChild = list[0].userId
+          setSearchParams((prev) => {
+            const nextParams = new URLSearchParams(prev)
+            nextParams.set('child', selectedChild)
+            return nextParams
+          }, { replace: true })
+        }
+      }
+
+      const attendanceRes = role === 'parent'
+        ? await attendanceApi.parent()
+        : await attendanceApi.student()
+      const progressRes = role === 'parent' ? await progressApi.parent() : await progressApi.student()
+      let att = attendanceRes.attendance ?? []
+      let prog = progressRes.progress ?? []
+      if (role === 'parent' && selectedChild) {
+        att = att.filter((row) => row.studentId === selectedChild)
+        prog = prog.filter((row) => row.studentId === selectedChild)
+      }
+      setAttendance(att)
+      setProgress(prog)
+
+      const noticeLists = await Promise.all(nextBatches.map((batch) => announcementApi.getByBatch(batch.batchId)))
+      const resourceLists = await Promise.all(nextBatches.map((batch) => resourceApi.getByBatch(batch.batchId)))
+      setNotices(noticeLists.flatMap((res) => res.announcements ?? []))
+      setResources(resourceLists.flatMap((res) => res.resources ?? []))
+    }
+    load().catch((err) => setError(err.message))
+  }, [role, childId])
+
+  const present = attendance.filter((row) => row.status === 'present' || row.status === 'late').length
+  const attendancePct = attendance.length ? Math.round((present / attendance.length) * 100) : overview?.attendancePercentage
+  const scorePoints = [...progress].reverse().slice(-8)
+  const filteredResources = resources.filter((item) =>
+    !resourceQuery.trim() || String(item.title ?? '').toLowerCase().includes(resourceQuery.trim().toLowerCase()),
+  )
+
+  const waitingForChild = role === 'parent' && children.length === 0
+
   return (
-    <div>
+    <div className="dashboard-layout">
+      <main className="dashboard-main">
+        <div className="dashboard-content-wrap">
       <div className="dashboard-header">
-        <h1>{title}</h1>
-        <p>Keep track of classes, schedules, and learning progress.</p>
+        <div>
+          <h1>{role === 'parent' ? 'Parent dashboard' : 'My learning'}</h1>
+          <p>Attendance, progress, materials, and a private line to the tutor.</p>
+        </div>
+        <Link className="btn-outline" to="/account/settings">Account settings</Link>
       </div>
+      <nav className="learner-nav button-row mb-6" aria-label="Dashboard sections">
+        {[
+          ['home', 'Overview', 0],
+          ['work', 'Attendance & progress', 0],
+          ['materials', 'Notes', 0],
+          ['chat', 'Chat', unreadChats],
+          ['alerts', 'Notifications', unreadNotes],
+        ].map(([key, label, count]) => (
+          <button key={key} type="button" className={`btn-outline btn-sm ${tab === key ? 'btn-primary' : ''}`} onClick={() => setTab(key)}>
+            {label}
+            {count > 0 && <span className="nav-badge">{count > 99 ? '99+' : count}</span>}
+          </button>
+        ))}
+      </nav>
       {error && <ErrorState message={error} />}
-      <section className="premium-card mb-6">
-        <h2>My batches</h2>
-        {batches.length === 0 ? (
-          <div className="empty-state">No active batches found.</div>
-        ) : (
-          <div className="batches-grid mt-4">
-            {batches.map((batch) => (
-              <article className="batch-card" key={batch.batchId}>
-                <h3>{batch.name}</h3>
-                <p className="text-muted">{(batch.subjects ?? []).join(', ') || 'No subjects'}</p>
-              </article>
+      {waitingForChild && (
+        <div className="empty-state premium-card mb-6">
+          <p>Waiting for your child to accept their invite. You will see their batches and scores here after they join.</p>
+          {pendingInvites.length > 0 && (
+            <ul className="session-list-mini mt-4">
+              {pendingInvites.map((row) => (
+                <li key={`${row.batchId}-${row.studentId}`}>Pending in {row.batchName}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {role === 'parent' && children.length > 0 && (
+        <div className="auth-field mb-6">
+          <label htmlFor="child-switcher">Viewing child</label>
+          <select id="child-switcher" value={childId} onChange={(e) => setChildId(e.target.value)}>
+            {children.map((child) => (
+              <option key={child.userId} value={child.userId}>{child.name}</option>
             ))}
-          </div>
-        )}
-      </section>
-      <section className="premium-card">
-        <h2>Upcoming sessions</h2>
-        {sessions.length === 0 ? (
-          <div className="empty-state">No upcoming sessions.</div>
-        ) : (
-          <div className="session-list mt-4">
-            {sessions.map((session) => (
-              <div className="session-list-item" key={session._id}>
-                <span>{new Date(session.date).toLocaleString()}</span>
-                <strong>{session.topic}</strong>
-                <span className={`status-badge ${session.status}`}>{session.status}</span>
+          </select>
+        </div>
+      )}
+      {(tab === 'chat' || tab === 'alerts') && (
+        tab === 'chat' ? <TutorChatPage embedded /> : <TutorNotificationsPage embedded />
+      )}
+      {tab === 'home' && (
+        <>
+          <section className="premium-card mb-6">
+            <h2>Snapshot</h2>
+            <p className="mt-4">Attendance: <strong>{attendancePct != null ? `${attendancePct}%` : '—'}</strong></p>
+            {scorePoints.length > 1 && (
+              <svg viewBox="0 0 160 48" className="mt-4" role="img" aria-label="Score trend">
+                <polyline
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  points={scorePoints.map((row, index) => {
+                    const x = (index / (scorePoints.length - 1)) * 160
+                    const pct = row.maxScore ? row.score / row.maxScore : 0
+                    const y = 44 - pct * 40
+                    return `${x},${y}`
+                  }).join(' ')}
+                />
+              </svg>
+            )}
+            {progress.length === 0 && <p className="text-muted mt-4">No scores yet for this view.</p>}
+          </section>
+          <section className="premium-card mb-6">
+            <h2>My batches</h2>
+            {batches.length === 0 ? (
+              <div className="empty-state">No active batches found.</div>
+            ) : (
+              <div className="batches-grid mt-4">
+                {batches.map((batch) => (
+                  <article className="batch-card" key={batch.batchId}>
+                    <h3>{batch.name}</h3>
+                    <p className="text-muted">{(batch.subjects ?? []).join(', ') || 'No subjects'}</p>
+                    <p className="text-muted">{formatSchedule(batch.schedule)}</p>
+                  </article>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            )}
+          </section>
+          <section className="premium-card">
+            <h2>Upcoming sessions</h2>
+            {sessions.length === 0 ? (
+              <div className="empty-state">No upcoming sessions.</div>
+            ) : (
+              <div className="session-list mt-4">
+                {sessions.map((session) => (
+                  <div className="session-list-item" key={session._id}>
+                    <span>{new Date(session.date).toLocaleString()}</span>
+                    <strong>{session.topic}</strong>
+                    <span className={`status-badge ${session.status}`}>{session.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+      {tab === 'work' && (
+        <div className="invite-grid">
+          <section className="premium-card">
+            <h2>Attendance</h2>
+            {attendance.length === 0 ? <p className="text-muted mt-4">No attendance yet.</p> : (
+              <ul className="session-list-mini mt-4">
+                {attendance.slice(0, 20).map((row) => (
+                  <li key={row._id}>
+                    <div>
+                      <strong>{row.status}</strong>
+                      <p className="text-muted text-sm">
+                        {row.sessionTopic || 'Class'} · {row.sessionDate ? new Date(row.sessionDate).toLocaleString() : new Date(row.markedAt || row.createdAt).toLocaleString()}
+                      </p>
+                      {row.corrections?.length > 0 && (
+                        <p className="text-muted text-sm">Corrected: {row.corrections.at(-1).note}</p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="premium-card">
+            <h2>Progress</h2>
+            {progress.length === 0 ? <p className="text-muted mt-4">No scores yet.</p> : (
+              <ul className="progress-feed mt-4">
+                {progress.slice(0, 20).map((row) => (
+                  <li key={row._id}>{row.topic}: {row.score}/{row.maxScore} {row.remark ? `· ${row.remark}` : ''}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      )}
+      {tab === 'materials' && (
+        <>
+          <section className="premium-card mb-6">
+            <h2>Notices</h2>
+            {notices.length === 0 ? <p className="text-muted mt-4">No notices.</p> : (
+              <ul className="session-list-mini mt-4">
+                {notices.slice(0, 20).map((item) => (
+                  <li key={item._id}>{item.text}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="premium-card">
+            <h2>Resources</h2>
+            <div className="auth-field mt-4">
+              <label htmlFor="resource-search">Search materials</label>
+              <input
+                id="resource-search"
+                value={resourceQuery}
+                onChange={(e) => setResourceQuery(e.target.value)}
+                placeholder="Search by title"
+              />
+            </div>
+            {filteredResources.length === 0 ? <p className="text-muted mt-4">No materials yet.</p> : (
+              <ul className="session-list-mini mt-4">
+                {filteredResources.map((item) => (
+                  <li key={item._id}>
+                    <a href={item.downloadUrl || item.url} target="_blank" rel="noreferrer">{item.title}</a>
+                    <span className="text-muted text-sm">{item.mimeType || item.type} · {new Date(item.createdAt).toLocaleDateString()}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
+        </div>
+      </main>
     </div>
   )
 }

@@ -9,9 +9,10 @@ export function TutorSubjectsPage() {
   const [editingName, setEditingName] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
 
-  async function load() {
-    const res = await subjectApi.list()
+  async function load(includeArchived = showArchived) {
+    const res = await subjectApi.list(includeArchived)
     setSubjects(res.subjects ?? [])
   }
 
@@ -59,6 +60,15 @@ export function TutorSubjectsPage() {
     }
   }
 
+  async function restore(subject) {
+    try {
+      await subjectApi.update(subject.subjectId, { status: 'active' })
+      await load()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   return (
     <div>
       <div className="dashboard-header">
@@ -84,7 +94,16 @@ export function TutorSubjectsPage() {
       </section>
 
       <section className="premium-card">
-        <h2>Your subjects</h2>
+        <div className="section-heading">
+          <h2>Your subjects</h2>
+          <button type="button" className="btn-outline btn-sm" onClick={() => {
+            const next = !showArchived
+            setShowArchived(next)
+            load(next).catch((err) => setError(err.message))
+          }}>
+            {showArchived ? 'Hide archived' : 'Show archived'}
+          </button>
+        </div>
         {subjects.length === 0 ? (
           <p className="text-muted mt-4">No subjects yet. Add one above.</p>
         ) : (

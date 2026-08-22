@@ -24,3 +24,11 @@ export const messageRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many messages sent. Try again shortly.' },
 })
+
+export const uploadRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many uploads. Try again shortly.' },
+})

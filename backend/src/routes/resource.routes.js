@@ -1,82 +1,73 @@
 import { Router } from 'express'
-import multer from 'multer'
-import path from 'path'
-import fs from 'fs'
-import { fileURLToPath } from 'url'
 import { Resource } from '../models/Resource.js'
 import { Batch } from '../models/Batch.js'
-import { User } from '../models/User.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
+import { createUpload, SAFE_DOCUMENT_TYPES } from '../middleware/uploads.js'
+import { storeFile, deleteStoredFile, scanFile } from '../services/storageService.js'
+import { canAccessBatch } from '../services/accessService.js'
+import { notifyMany } from '../services/notificationService.js'
+import { uploadRateLimiter } from '../middleware/rateLimit.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const uploadsDir = path.join(__dirname, '../../uploads')
+const upload = createUpload({ allowedTypes: SAFE_DOCUMENT_TYPES, maxFileSize: 10 * 1024 * 1024 })
 
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true })
+function publicResource(resource) {
+  const value = resource.toObject ? resource.toObject() : resource
+  return {
+    ...value,
+    downloadUrl: value.type === 'file' ? `/api/files/resources/${value._id}` : null,
+  }
 }
 
-const ALLOWED_TYPES = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain',
-])
+function batchRecipients(batch) {
+  const students = []
+  const parents = []
+  for (const row of batch.enrollment ?? []) {
+    if (row.status !== 'active') continue
+    students.push(row.studentId)
+    if (row.parentId) parents.push(row.parentId)
+  }
+  return { students, parents }
+}
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `${Date.now()}-${safe}`)
-  },
-})
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_TYPES.has(file.mimetype)) cb(null, true)
-    else cb(new Error('File type not allowed'))
-  },
-})
+async function notifyResourceShared(batch, title) {
+  const { students, parents } = batchRecipients(batch)
+  await notifyMany(students, {
+    title: 'New material shared',
+    message: `"${title}" was added to ${batch.name}`,
+    type: 'batch',
+    event: 'batch',
+    link: '/student/dashboard?tab=materials',
+  })
+  await notifyMany(parents, {
+    title: 'New material shared',
+    message: `"${title}" was added to ${batch.name}`,
+    type: 'batch',
+    event: 'batch',
+    link: '/parent/dashboard?tab=materials',
+  })
+}
 
 const router = Router()
-
 router.use(requireAuth)
 
 router.get('/batch/:batchId', async (req, res) => {
   try {
-    const batch = await Batch.findOne({ batchId: req.params.batchId, status: 'active' })
+    const { allowed, batch } = await canAccessBatch(req.user, req.params.batchId)
     if (!batch) return res.status(404).json({ error: 'Batch not found' })
+    if (!allowed) return res.status(403).json({ error: 'Forbidden' })
 
-    if (req.user.role === 'tutor' && batch.tutorId !== req.user.userId) {
-      return res.status(403).json({ error: 'Forbidden' })
-    }
-    
-    if (req.user.role === 'student') {
-      const isEnrolled = batch.enrollment.some(e => e.studentId === req.user.userId && e.status === 'active')
-      if (!isEnrolled) return res.status(403).json({ error: 'Forbidden' })
-    }
-    
-    if (req.user.role === 'parent') {
-      const parent = await User.findOne({ userId: req.user.userId })
-      if (!parent || !batch.enrollment.some(e => parent.linkedStudentIds.includes(e.studentId) && e.status === 'active')) {
-        return res.status(403).json({ error: 'Forbidden' })
-      }
-    }
-
-    const resources = await Resource.find({ batchId: req.params.batchId }).sort({ createdAt: -1 })
-    res.json({ resources })
+    const query = String(req.query.q ?? '').trim()
+    const filter = { batchId: req.params.batchId }
+    if (query) filter.title = { $regex: query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+    const resources = await Resource.find(filter).sort({ createdAt: -1 })
+    res.json({ resources: resources.map(publicResource) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
   }
 })
 
-router.post('/upload', requireRole('tutor'), upload.single('file'), async (req, res) => {
+router.post('/upload', requireRole('tutor'), uploadRateLimiter, upload.single('file'), async (req, res) => {
   try {
     const batchId = String(req.body.batchId ?? '')
     const title = String(req.body.title ?? req.file?.originalname ?? 'Untitled').trim()
@@ -88,15 +79,26 @@ router.post('/upload', requireRole('tutor'), upload.single('file'), async (req, 
     const batch = await Batch.findOne({ batchId, tutorId: req.user.userId, status: 'active' })
     if (!batch) return res.status(404).json({ error: 'Batch not found' })
 
+    await scanFile(req.file.buffer, req.file.mimetype)
+    const stored = await storeFile({
+      buffer: req.file.buffer,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      folder: `resources/${batchId}`,
+    })
     const resource = await Resource.create({
       tutorId: req.user.userId,
       batchId,
       title,
       type: 'file',
-      url: `/uploads/${req.file.filename}`,
+      storageKey: stored.storageKey,
+      fileName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      sizeBytes: req.file.size,
     })
 
-    res.status(201).json({ resource })
+    await notifyResourceShared(batch, title)
+    res.status(201).json({ resource: publicResource(resource) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: error.message ?? 'Server error' })
@@ -124,7 +126,8 @@ router.post('/link', requireRole('tutor'), async (req, res) => {
       url,
     })
 
-    res.status(201).json({ resource })
+    await notifyResourceShared(batch, title)
+    res.status(201).json({ resource: publicResource(resource) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -138,10 +141,7 @@ router.delete('/:id', requireRole('tutor'), async (req, res) => {
       return res.status(404).json({ error: 'Resource not found' })
     }
 
-    if (resource.type === 'file' && resource.url.startsWith('/uploads/')) {
-      const filePath = path.join(uploadsDir, path.basename(resource.url))
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
-    }
+    if (resource.type === 'file') await deleteStoredFile(resource.storageKey)
 
     await resource.deleteOne()
     res.json({ message: 'Deleted' })

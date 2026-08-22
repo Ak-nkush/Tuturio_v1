@@ -6,6 +6,8 @@ import { ForgotPasswordPage } from '../modules/auth/pages/ForgotPasswordPage'
 import { InvitePage } from '../modules/auth/pages/InvitePage'
 import { LoginPage } from '../modules/auth/pages/LoginPage'
 import { ResetPasswordPage } from '../modules/auth/pages/ResetPasswordPage'
+import { RegisterPage } from '../modules/auth/pages/RegisterPage'
+import { AccountSettingsPage } from '../modules/auth/pages/AccountSettingsPage'
 import { BatchDetailsPage } from '../modules/dashboard/pages/BatchDetailsPage'
 import { SessionWorkspacePage } from '../modules/dashboard/pages/SessionWorkspacePage'
 import { TutorChatPage } from '../modules/dashboard/pages/TutorChatPage'
@@ -30,9 +32,18 @@ export function AppRoutes() {
           <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/auth/login" element={<LoginPage />} />
+          <Route path="/auth/register" element={<RegisterPage />} />
           <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/auth/reset-password/:token" element={<ResetPasswordPage />} />
           <Route path="/invite/:code" element={<InvitePage />} />
+          <Route
+            path="/account/settings"
+            element={
+              <ProtectedRoute>
+                <AccountSettingsPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/tutor/dashboard"
             element={

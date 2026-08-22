@@ -5,7 +5,7 @@ const enrollmentSchema = new Schema(
     studentId: { type: String, required: true },
     parentId: { type: String, default: null },
     joinedAt: { type: Date, default: Date.now },
-    status: { type: String, enum: ['active', 'removed'], default: 'active' },
+    status: { type: String, enum: ['pending', 'active', 'removed', 'archived'], default: 'pending' },
   },
   { _id: false },
 )
@@ -30,13 +30,18 @@ const batchSchema = new Schema(
 export const Batch = mongoose.model('Batch', batchSchema)
 
 export function publicBatch(batch) {
+  const enrollment = batch.enrollment ?? []
   return {
     batchId: batch.batchId,
     tutorId: batch.tutorId,
     name: batch.name,
     subjects: batch.subjects,
     schedule: batch.schedule,
-    enrollment: batch.enrollment,
+    enrollment,
+    activeCount: enrollment.filter((entry) => entry.status === 'active').length,
+    pendingCount: enrollment.filter((entry) => entry.status === 'pending').length,
+    removedCount: enrollment.filter((entry) => entry.status === 'removed').length,
+    archivedCount: enrollment.filter((entry) => entry.status === 'archived').length,
     holidays: batch.holidays ?? [],
     status: batch.status,
     createdAt: batch.createdAt,

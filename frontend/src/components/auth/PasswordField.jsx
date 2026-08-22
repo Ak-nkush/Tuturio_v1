@@ -20,7 +20,7 @@ export function PasswordField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoComplete={id === 'password' ? 'new-password' : 'current-password'}
-        minLength={minLength}
+        minLength={minLength ?? PASSWORD_MIN_LENGTH}
         required
       />
       {showStrength && value && (

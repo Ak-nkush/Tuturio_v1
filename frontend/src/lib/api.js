@@ -17,6 +17,8 @@ async function parseJson(res) {
     err.currentRole = data.currentRole
     err.inviteRole = data.inviteRole
     err.existingRole = data.existingRole
+    err.futureSessionsAffected = data.futureSessionsAffected
+    err.preview = data.preview
     throw err
   }
   return data
@@ -75,6 +77,7 @@ export const inviteApi = {
       body: JSON.stringify(body),
     }),
   send: (code) => apiFetch(`/api/invites/${code}/send`, { method: 'POST' }),
+  revoke: (code) => apiFetch(`/api/invites/${code}/revoke`, { method: 'POST' }),
 }
 
 export const batchApi = {
@@ -83,11 +86,22 @@ export const batchApi = {
   students: () => apiFetch('/api/batches/students/all'),
   getStudentEnrolled: () => apiFetch('/api/batches/student/enrolled'),
   getParentEnrolled: () => apiFetch('/api/batches/parent/enrolled'),
+  getParentStudents: () => apiFetch('/api/batches/parent/students'),
   create: (body) => apiFetch('/api/batches', { method: 'POST', body: JSON.stringify(body) }),
   update: (batchId, body) => apiFetch(`/api/batches/${batchId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  previewScheduleChange: (batchId, body) =>
+    apiFetch(`/api/batches/${batchId}/preview-schedule-change`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   archive: (batchId) => apiFetch(`/api/batches/${batchId}`, { method: 'DELETE' }),
   removeStudent: (batchId, studentId) =>
     apiFetch(`/api/batches/${batchId}/students/${studentId}`, { method: 'PATCH' }),
+  updateStudentStatus: (batchId, studentId, status) =>
+    apiFetch(`/api/batches/${batchId}/students/${studentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   addHoliday: (batchId, date) =>
     apiFetch(`/api/batches/${batchId}/holidays`, { method: 'POST', body: JSON.stringify({ date }) }),
   removeHoliday: (batchId, date) =>
@@ -115,6 +129,12 @@ export const attendanceApi = {
   student: () => apiFetch('/api/attendance/student/me'),
   parent: () => apiFetch('/api/attendance/parent/students'),
   tutorStudent: (studentId) => apiFetch(`/api/attendance/tutor/student/${studentId}`),
+  byStudent: (studentId) => apiFetch(`/api/attendance/student/${studentId}`),
+  correct: (sessionId, studentId, body) =>
+    apiFetch(`/api/attendance/session/${sessionId}/student/${studentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 }
 
 export const announcementApi = {
@@ -141,7 +161,8 @@ export const progressApi = {
   getBySession: (sessionId) => apiFetch(`/api/progress/session/${sessionId}`),
   student: () => apiFetch('/api/progress/student/me'),
   parent: () => apiFetch('/api/progress/parent/students'),
-  tutorStudent: (studentId) => apiFetch(`/api/progress/tutor/student/${studentId}`),
+  tutorStudent: (studentId, includeArchived = false) =>
+    apiFetch(`/api/progress/tutor/student/${studentId}${includeArchived ? '?includeArchived=1' : ''}`),
   create: (body) => apiFetch('/api/progress', { method: 'POST', body: JSON.stringify(body) }),
   update: (id, body) => apiFetch(`/api/progress/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id) => apiFetch(`/api/progress/${id}`, { method: 'DELETE' }),
@@ -173,6 +194,11 @@ export const notificationApi = {
     apiFetch('/api/notifications/preferences', { method: 'PATCH', body: JSON.stringify(body) }),
 }
 
+export const conversationApi = {
+  create: (peerId) =>
+    apiFetch('/api/conversations', { method: 'POST', body: JSON.stringify({ peerId }) }),
+}
+
 export const messageApi = {
   contacts: () => apiFetch('/api/messages/contacts'),
   conversations: () => apiFetch('/api/messages/conversations'),
@@ -195,6 +221,12 @@ export const messageApi = {
 }
 
 export const userApi = {
+  updateProfile: (body) => apiFetch('/api/users/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  uploadProfilePicture: (file) => {
+    const body = new FormData()
+    body.append('file', file)
+    return apiFetch('/api/users/profile-picture', { method: 'POST', body })
+  },
   archive: (userId) => apiFetch(`/api/users/${userId}/archive`, { method: 'POST' }),
   unarchive: (userId) => apiFetch(`/api/users/${userId}/unarchive`, { method: 'POST' }),
 }
@@ -223,7 +255,23 @@ async function downloadCsv(path) {
 
 export const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-export const PASSWORD_MIN_LENGTH = 16
+export function formatSchedule(schedule) {
+  const days = (schedule?.days ?? []).map((day) => DAY_LABELS[day]).filter(Boolean)
+  const time = schedule?.time
+  if (!days.length && !time) return 'No schedule set'
+  if (!days.length) return time
+  return `${days.join(', ')} · ${time ?? 'No time'}`
+}
+
+export function studentRosterState(student) {
+  if (student.status === 'removed') return { key: 'removed', label: 'Removed' }
+  if (student.status === 'archived') return { key: 'archived', label: 'Archived' }
+  if (student.status === 'pending') return { key: 'pending', label: 'Pending invite' }
+  if (student.accountStatus === 'archived') return { key: 'archived', label: 'Paused' }
+  return { key: 'active', label: 'Active' }
+}
+
+export const PASSWORD_MIN_LENGTH = 8
 
 export function validatePassword(password) {
   if (password.length < PASSWORD_MIN_LENGTH) {

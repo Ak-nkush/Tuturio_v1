@@ -1,5 +1,32 @@
 import { useEffect, useState } from 'react'
-import { DAY_LABELS, subjectApi } from '../../../lib/api'
+import { DAY_LABELS, batchApi, formatSchedule, subjectApi } from '../../../lib/api'
+
+function formatSessionStamp(value) {
+  return new Date(value).toLocaleString([], {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function PreviewList({ items, empty, renderItem, itemKey }) {
+  const list = items ?? []
+  const shown = list.slice(0, 10)
+  return list.length === 0 ? (
+    <p className="text-muted text-sm">{empty}</p>
+  ) : (
+    <>
+      <ul className="session-list-mini">
+        {shown.map((item, index) => (
+          <li key={itemKey(item, index)}>{renderItem(item)}</li>
+        ))}
+      </ul>
+      {list.length > 10 && <p className="text-muted text-sm">Showing first 10 of {list.length}.</p>}
+    </>
+  )
+}
 
 const EMPTY_FORM = {
   name: '',
@@ -23,6 +50,9 @@ export function BatchFormModal({ batch, onClose, onSave }) {
   const [catalog, setCatalog] = useState([])
   const [selected, setSelected] = useState(batch ? [...(batch.subjects ?? [])] : [])
   const [newSubject, setNewSubject] = useState('')
+  const [schedulePreview, setSchedulePreview] = useState(null)
+  const [pendingPayload, setPendingPayload] = useState(null)
+  const [weeksAhead, setWeeksAhead] = useState(4)
 
   useEffect(() => {
     subjectApi
@@ -49,21 +79,22 @@ export function BatchFormModal({ batch, onClose, onSave }) {
         schedule: { days: form.days, time: form.time },
       }
       if (isEdit) {
-        const prevDays = JSON.stringify(batch.schedule?.days ?? [])
-        const nextDays = JSON.stringify(form.days)
+        const prevDays = JSON.stringify([...(batch.schedule?.days ?? [])].map(Number).sort())
+        const nextDays = JSON.stringify([...form.days].map(Number).sort())
         const scheduleChanged = prevDays !== nextDays || (batch.schedule?.time ?? '18:00') !== form.time
         if (scheduleChanged) {
-          const confirmed = window.confirm(
-            'This will replace future scheduled sessions to match the new timetable. Past sessions stay as they are. Continue?',
-          )
-          if (!confirmed) {
-            setSaving(false)
-            return
-          }
-          payload.regenerateSessions = true
+          const res = await batchApi.previewScheduleChange(batch.batchId, {
+            schedule: payload.schedule,
+            weeksAhead,
+          })
+          setPendingPayload(payload)
+          setSchedulePreview(res.preview)
+          return
         }
+        await onSave(payload, true)
+      } else {
+        await onSave(payload, false)
       }
-      await onSave(payload, isEdit)
       onClose()
     } catch (err) {
       setError(err?.message ?? 'Could not save batch')
@@ -72,12 +103,122 @@ export function BatchFormModal({ batch, onClose, onSave }) {
     }
   }
 
+  async function applyScheduleUpdate(regenerate) {
+    if (!pendingPayload) return
+    setError('')
+    setSaving(true)
+    try {
+      await onSave(
+        regenerate ? { ...pendingPayload, regenerateSessions: true } : pendingPayload,
+        true,
+      )
+      onClose()
+    } catch (err) {
+      setError(err?.message ?? 'Could not update schedule')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal-card ${schedulePreview ? 'modal-card-wide' : ''}`} onClick={(e) => e.stopPropagation()}>
         <h2>{isEdit ? 'Edit batch' : 'Create batch'}</h2>
-        <p className="modal-sub">Set subjects and weekly schedule. Sessions auto-generate for the next 4 weeks.</p>
+        <p className="modal-sub">
+          {schedulePreview
+            ? 'Review the sessions that will change. Nothing is updated until you choose an action.'
+            : 'Set subjects and weekly schedule. Sessions auto-generate for the next 4 weeks.'}
+        </p>
 
+        {schedulePreview ? (
+          <div>
+            {error && <div className="auth-error">{error}</div>}
+            <h3>Schedule change preview</h3>
+            <p className="text-sm mt-4">
+              Next {schedulePreview.weeksAhead ?? weeksAhead} weeks · Current:{' '}
+              <strong>{formatSchedule(schedulePreview.currentSchedule)}</strong> → Proposed:{' '}
+              <strong>{formatSchedule(schedulePreview.proposedSchedule)}</strong>
+            </p>
+            <p className="text-sm mt-4">
+              Sessions to remove: <strong>{schedulePreview.counts?.toRemove ?? schedulePreview.toRemove?.length ?? 0}</strong>
+              {' · '}
+              Sessions to create: <strong>{schedulePreview.counts?.toCreate ?? schedulePreview.toCreate?.length ?? 0}</strong>
+              {' · '}
+              Sessions to modify: <strong>{schedulePreview.counts?.toModify ?? schedulePreview.toModify?.length ?? 0}</strong>
+            </p>
+            <div className="auth-field mt-4">
+              <label htmlFor="preview-window">Preview window</label>
+              <select
+                id="preview-window"
+                value={weeksAhead}
+                onChange={async (e) => {
+                  const next = Number(e.target.value)
+                  setWeeksAhead(next)
+                  if (!pendingPayload || !batch?.batchId) return
+                  try {
+                    const res = await batchApi.previewScheduleChange(batch.batchId, {
+                      schedule: pendingPayload.schedule,
+                      weeksAhead: next,
+                    })
+                    setSchedulePreview(res.preview)
+                  } catch (err) {
+                    setError(err?.message ?? 'Could not refresh preview')
+                  }
+                }}
+              >
+                <option value={4}>4 weeks</option>
+                <option value={8}>8 weeks</option>
+                <option value={12}>12 weeks</option>
+              </select>
+            </div>
+            <div className="schedule-preview-grid mt-6">
+              <section>
+                <h3>To remove ({schedulePreview.toRemove?.length ?? 0})</h3>
+                <PreviewList
+                  items={schedulePreview.toRemove}
+                  empty="No future sessions fall off this timetable."
+                  itemKey={(session) => session._id ?? session.date}
+                  renderItem={(session) => `${formatSessionStamp(session.date)}${session.topic ? ` · ${session.topic}` : ''}`}
+                />
+              </section>
+              <section>
+                <h3>To create ({schedulePreview.toCreate?.length ?? 0})</h3>
+                <PreviewList
+                  items={schedulePreview.toCreate}
+                  empty="No new sessions in this window."
+                  itemKey={(session) => session.date}
+                  renderItem={(session) => formatSessionStamp(session.date)}
+                />
+              </section>
+              <section>
+                <h3>To modify ({schedulePreview.toModify?.length ?? 0})</h3>
+                <PreviewList
+                  items={schedulePreview.toModify}
+                  empty="No existing sessions change time."
+                  itemKey={(item) => item.existing?._id ?? item.proposed?.date}
+                  renderItem={(item) =>
+                    `${formatSessionStamp(item.existing?.date)} → ${formatSessionStamp(item.proposed?.date)}`
+                  }
+                />
+              </section>
+            </div>
+            <p className="text-muted text-sm mt-4">
+              Regenerating replaces future scheduled sessions. Past, completed, cancelled, and one-off sessions on
+              other days are left as they are unless they are still marked scheduled in the future.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn-outline" onClick={() => { setSchedulePreview(null); setPendingPayload(null) }}>
+                Cancel
+              </button>
+              <button type="button" className="btn-outline" onClick={() => applyScheduleUpdate(false)} disabled={saving}>
+                {saving ? 'Saving…' : 'Save without regenerating'}
+              </button>
+              <button type="button" className="auth-btn" onClick={() => applyScheduleUpdate(true)} disabled={saving}>
+                {saving ? 'Updating…' : 'Confirm & regenerate'}
+              </button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit}>
           {error && <div className="auth-error">{error}</div>}
 
@@ -176,6 +317,7 @@ export function BatchFormModal({ batch, onClose, onSave }) {
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   )

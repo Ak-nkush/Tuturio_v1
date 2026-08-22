@@ -12,6 +12,7 @@ const sessionSchema = new Schema(
       default: 'scheduled',
     },
     isHoliday: { type: Boolean, default: false },
+    oneOff: { type: Boolean, default: false },
   },
   { timestamps: true }
 )

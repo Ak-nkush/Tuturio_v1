@@ -76,7 +76,7 @@ router.post('/paired', requireAuth, requireRole('tutor'), async (req, res) => {
   batch.enrollment.push({
     studentId: linkedStudentId,
     joinedAt: new Date(),
-    status: 'active',
+    status: 'pending',
   })
   await batch.save()
 
@@ -161,13 +161,13 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
     }
 
     if (invite.role === 'student') {
-      const alreadyEnrolled = batch.enrollment.some(
-        (enrollment) => enrollment.studentId === req.user.userId && enrollment.status === 'active',
-      )
-      if (!alreadyEnrolled) {
+      const enrollment = batch.enrollment.find((item) => item.studentId === req.user.userId && item.status !== 'removed')
+      if (enrollment) {
+        enrollment.status = 'active'
+      } else {
         batch.enrollment.push({ studentId: req.user.userId, joinedAt: new Date(), status: 'active' })
-        await batch.save()
       }
+      await batch.save()
     } else {
       await linkParentToStudent(req.user.userId, invite.linkedStudentId, batch)
     }
@@ -209,13 +209,13 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
     }
 
     if (invite.role === 'student') {
-      const alreadyEnrolled = batch.enrollment.some(
-        (enrollment) => enrollment.studentId === existing.userId && enrollment.status === 'active',
-      )
-      if (!alreadyEnrolled) {
+      const enrollment = batch.enrollment.find((item) => item.studentId === existing.userId && item.status !== 'removed')
+      if (enrollment) {
+        enrollment.status = 'active'
+      } else {
         batch.enrollment.push({ studentId: existing.userId, joinedAt: new Date(), status: 'active' })
-        await batch.save()
       }
+      await batch.save()
     } else {
       await linkParentToStudent(existing.userId, invite.linkedStudentId, batch)
     }
@@ -247,10 +247,9 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
   })
 
   if (invite.role === 'student') {
-    const enrollment = batch.enrollment.find(
-      (enrollmentItem) => enrollmentItem.studentId === user.userId && enrollmentItem.status === 'active',
-    )
+    const enrollment = batch.enrollment.find((enrollmentItem) => enrollmentItem.studentId === user.userId && enrollmentItem.status !== 'removed')
     if (enrollment) {
+      enrollment.status = 'active'
       if (enrollment.parentId && !user.linkedParentIds.includes(enrollment.parentId)) {
         user.linkedParentIds.push(enrollment.parentId)
         await user.save()
@@ -290,9 +289,7 @@ async function linkParentToStudent(parentId, studentId, batch) {
     await student.save()
   }
 
-  const enrollment = batch.enrollment.find(
-    (enrollmentItem) => enrollmentItem.studentId === studentId && enrollmentItem.status === 'active',
-  )
+  const enrollment = batch.enrollment.find((enrollmentItem) => enrollmentItem.studentId === studentId && enrollmentItem.status !== 'removed')
   if (enrollment) {
     enrollment.parentId = parentId
   } else {
@@ -388,6 +385,21 @@ router.post('/:code/send', requireAuth, requireRole('tutor'), async (req, res) =
     console.error('Failed to send invite email:', err)
     return res.status(500).json({ message: 'Failed to send invite email' })
   }
+})
+
+// Revoking an invite also revokes its paired invite, so a student/parent pair
+// cannot be partially onboarded from an invitation the tutor has withdrawn.
+router.post('/:code/revoke', requireAuth, requireRole('tutor'), async (req, res) => {
+  const invite = await Invite.findOne({ code: req.params.code })
+  if (!invite) return res.status(404).json({ message: 'Invite not found' })
+  if (invite.used) return res.status(409).json({ message: 'Redeemed invites cannot be revoked' })
+
+  const batch = await Batch.findOne({ batchId: invite.batchId, tutorId: req.user.userId, status: 'active' })
+  if (!batch) return res.status(403).json({ message: 'Not authorized to revoke this invite' })
+
+  const inviteIds = [invite.inviteId, invite.pairedInviteId].filter(Boolean)
+  await Invite.updateMany({ inviteId: { $in: inviteIds }, used: false }, { $set: { revoked: true } })
+  return res.json({ message: 'Invite revoked' })
 })
 
 export default router

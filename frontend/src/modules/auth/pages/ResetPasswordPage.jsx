@@ -45,7 +45,7 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <AuthLayout title="Choose a new password" subtitle="Must be at least 16 characters.">
+    <AuthLayout title="Choose a new password" subtitle="Must be at least 8 characters.">
       {error && <div className="auth-error">{error}</div>}
 
       <form onSubmit={handleSubmit}>

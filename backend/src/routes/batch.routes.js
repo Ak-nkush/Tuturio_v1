@@ -1,10 +1,11 @@
 import { Router } from 'express'
 import { Batch, publicBatch } from '../models/Batch.js'
+import { Invite } from '../models/Invite.js'
 import { Session } from '../models/Session.js'
 import { User } from '../models/User.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { generateBatchId } from '../utils/ids.js'
-import { generateSessionsForBatch, regenerateFutureSessions } from '../services/sessionService.js'
+import { generateSessionsForBatch, previewScheduleChange, regenerateFutureSessions } from '../services/sessionService.js'
 
 const router = Router()
 
@@ -28,23 +29,43 @@ function parseSchedule(body) {
   return { days, time }
 }
 
+function schedulesMatch(a, b) {
+  const leftDays = [...(a?.days ?? [])].map(Number).sort().join(',')
+  const rightDays = [...(b?.days ?? [])].map(Number).sort().join(',')
+  return leftDays === rightDays && String(a?.time ?? '18:00') === String(b?.time ?? '18:00')
+}
+
 async function resolveStudents(enrollment, { includeRemoved = false } = {}) {
-  const rows = includeRemoved ? enrollment : enrollment.filter((e) => e.status === 'active')
+  const rows = includeRemoved
+    ? enrollment
+    : enrollment.filter((e) => e.status === 'active' || e.status === 'pending')
   const studentIds = rows.map((e) => e.studentId)
   const parentIds = rows.map((e) => e.parentId).filter(Boolean)
-  const users = await User.find({ userId: { $in: [...studentIds, ...parentIds] } })
+  const pendingIds = rows.filter((e) => e.status === 'pending').map((e) => e.studentId)
+  const [users, invites] = await Promise.all([
+    User.find({ userId: { $in: [...studentIds, ...parentIds] } }),
+    pendingIds.length
+      ? Invite.find({ linkedStudentId: { $in: pendingIds }, role: 'student' })
+      : Promise.resolve([]),
+  ])
   const byId = Object.fromEntries(users.map((u) => [u.userId, u]))
+  const inviteByStudent = Object.fromEntries(invites.map((invite) => [invite.linkedStudentId, invite]))
 
-  return rows.map((e) => ({
-    studentId: e.studentId,
-    name: byId[e.studentId]?.name ?? e.studentId,
-    email: byId[e.studentId]?.email ?? null,
-    accountStatus: byId[e.studentId]?.status ?? 'active',
-    parentId: e.parentId ?? null,
-    parentName: e.parentId ? byId[e.parentId]?.name ?? e.parentId : null,
-    joinedAt: e.joinedAt,
-    status: e.status,
-  }))
+  return rows.map((e) => {
+    const user = byId[e.studentId]
+    const invite = inviteByStudent[e.studentId]
+    return {
+      studentId: e.studentId,
+      name: user?.name ?? (e.status === 'pending' ? 'Awaiting registration' : e.studentId),
+      email: user?.email ?? invite?.email ?? null,
+      accountStatus: user?.status ?? (e.status === 'pending' ? 'pending' : 'active'),
+      parentId: e.parentId ?? null,
+      parentName: e.parentId ? byId[e.parentId]?.name ?? e.parentId : null,
+      joinedAt: e.joinedAt,
+      status: e.status,
+      inviteExpiresAt: invite?.expiresAt ?? null,
+    }
+  })
 }
 
 router.get('/', requireRole('tutor'), async (req, res) => {
@@ -93,7 +114,19 @@ router.get('/parent/students', async (req, res) => {
     if (!parent) return res.status(404).json({ error: 'User not found' })
     
     const students = await User.find({ userId: { $in: parent.linkedStudentIds } })
-    res.json({ students: students.map(s => ({ userId: s.userId, name: s.name, email: s.email })) })
+    const batches = await Batch.find({ status: 'active', 'enrollment.parentId': parent.userId })
+    const pending = []
+    for (const batch of batches) {
+      for (const row of batch.enrollment) {
+        if (row.parentId === parent.userId && row.status === 'pending') {
+          pending.push({ batchId: batch.batchId, batchName: batch.name, studentId: row.studentId })
+        }
+      }
+    }
+    res.json({
+      students: students.map((s) => ({ userId: s.userId, name: s.name, email: s.email })),
+      pending,
+    })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -189,15 +222,18 @@ router.patch('/:batchId', requireRole('tutor'), async (req, res) => {
     }
 
     let scheduleChanged = false
+    let nextSchedule = batch.schedule
     if (req.body.schedule !== undefined || req.body.days !== undefined || req.body.time !== undefined) {
-      batch.schedule = parseSchedule(req.body.schedule ?? req.body)
-      scheduleChanged = true
+      nextSchedule = parseSchedule(req.body.schedule ?? req.body)
+      scheduleChanged = !schedulesMatch(batch.schedule, nextSchedule)
     }
+
+    if (scheduleChanged) batch.schedule = nextSchedule
 
     await batch.save()
 
     let sessionsCreated = 0
-    if (scheduleChanged && req.body.regenerateSessions !== false) {
+    if (req.body.regenerateSessions === true) {
       const sessions = await regenerateFutureSessions(batch)
       sessionsCreated = sessions.length
     }
@@ -243,9 +279,21 @@ router.patch('/:batchId/students/:studentId', requireRole('tutor'), async (req, 
     const enrollment = batch.enrollment.find((e) => e.studentId === req.params.studentId)
     if (!enrollment) return res.status(404).json({ error: 'Student not found in batch' })
 
-    enrollment.status = 'removed'
+    const allowed = ['pending', 'active', 'removed', 'archived']
+    const status = req.body.status === undefined ? 'removed' : String(req.body.status)
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` })
+    }
+
+    enrollment.status = status
     await batch.save()
-    res.json({ message: 'Student removed from batch. Attendance and progress records are kept.' })
+    res.json({
+      message: status === 'removed'
+        ? 'Student removed from batch. Attendance and progress records are kept.'
+        : `Student status updated to ${status}.`,
+      enrollment: { studentId: enrollment.studentId, status: enrollment.status },
+      batch: publicBatch(batch),
+    })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -273,12 +321,12 @@ router.post('/:batchId/holidays', requireRole('tutor'), async (req, res) => {
     const dayEnd = new Date(date)
     dayEnd.setHours(23, 59, 59, 999)
 
-    await Session.updateMany(
+    const cancelled = await Session.updateMany(
       { batchId: batch.batchId, date: { $gte: dayStart, $lte: dayEnd } },
       { isHoliday: true, status: 'cancelled' },
     )
 
-    res.json({ batch: publicBatch(batch) })
+    res.json({ batch: publicBatch(batch), sessionsCancelled: cancelled.modifiedCount ?? 0 })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -310,6 +358,24 @@ router.delete('/:batchId/holidays', requireRole('tutor'), async (req, res) => {
     )
 
     res.json({ batch: publicBatch(batch) })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+router.post('/:batchId/preview-schedule-change', requireRole('tutor'), async (req, res) => {
+  try {
+    const batch = await Batch.findOne({ batchId: req.params.batchId, tutorId: req.user.userId, status: 'active' })
+    if (!batch) return res.status(404).json({ error: 'Batch not found' })
+
+    const schedule = parseSchedule(req.body.schedule ?? req.body)
+    let weeksAhead = Number(req.body.weeksAhead ?? 4)
+    if (!Number.isFinite(weeksAhead) || weeksAhead < 1) weeksAhead = 4
+    weeksAhead = Math.min(12, Math.round(weeksAhead))
+
+    const preview = await previewScheduleChange(batch, schedule, weeksAhead)
+    res.json({ preview })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })

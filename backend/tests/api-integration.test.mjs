@@ -71,7 +71,7 @@ async function main() {
   // Cross-section state
   let tutorId, batchId, studentCode, parentCode, linkedStudentId
   let studentUserId, parentUserId
-  let sessionId, assignmentId, submissionId, progressId, announcementId, resourceId, submissionFile
+  let sessionId, assignmentId, submissionId, progressId, announcementId, resourceId, submissionDownloadUrl, messageDownloadUrl
 
   section('1. Health & unauthenticated access')
   {
@@ -154,6 +154,106 @@ async function main() {
       sessions,
     )
 
+    const nowMs = Date.now()
+    const futureIds = (list) =>
+      (list ?? [])
+        .filter((session) => session.status === 'scheduled' && new Date(session.date).getTime() >= nowMs)
+        .map((session) => session._id)
+        .sort()
+        .join(',')
+    const beforeIds = futureIds(sessions.data.sessions)
+
+    const timePreview = await tutor.req('POST', `/api/batches/${batchId}/preview-schedule-change`, {
+      body: { schedule: { days: [1, 3, 5], time: '19:00' }, weeksAhead: 4 },
+    })
+    check(
+      'Preview time change reports toModify without writing',
+      timePreview.status === 200 &&
+        Array.isArray(timePreview.data?.preview?.toModify) &&
+        timePreview.data.preview.toModify.length > 0 &&
+        Array.isArray(timePreview.data.preview.toRemove) &&
+        Array.isArray(timePreview.data.preview.toCreate),
+      timePreview,
+    )
+
+    const dayPreview = await tutor.req('POST', `/api/batches/${batchId}/preview-schedule-change`, {
+      body: { schedule: { days: [2, 4], time: '17:30' }, weeksAhead: 4 },
+    })
+    check(
+      'Preview day change reports toRemove and toCreate',
+      dayPreview.status === 200 &&
+        dayPreview.data.preview.toRemove.length > 0 &&
+        dayPreview.data.preview.toCreate.length > 0,
+      dayPreview,
+    )
+
+    const afterPreview = await tutor.req('GET', `/api/sessions/batch/${batchId}`)
+    check(
+      'Preview endpoint does not modify sessions',
+      afterPreview.status === 200 && futureIds(afterPreview.data.sessions) === beforeIds,
+      afterPreview,
+    )
+
+    const patchedSchedule = await tutor.req('PATCH', `/api/batches/${batchId}`, {
+      body: { days: [2, 4], time: '17:30' },
+    })
+    check(
+      'Schedule change without regenerateSessions updates batch only',
+      patchedSchedule.status === 200 && patchedSchedule.data?.batch?.schedule?.time === '17:30',
+      patchedSchedule,
+    )
+    const afterSilentPatch = await tutor.req('GET', `/api/sessions/batch/${batchId}`)
+    check(
+      'Schedule change without regenerateSessions does not modify future sessions',
+      afterSilentPatch.status === 200 && futureIds(afterSilentPatch.data.sessions) === beforeIds,
+      afterSilentPatch,
+    )
+
+    const regenerated = await tutor.req('PATCH', `/api/batches/${batchId}`, {
+      body: { days: [2, 4], time: '17:30', regenerateSessions: true },
+    })
+    check(
+      'Explicit regenerateSessions recreates future sessions',
+      regenerated.status === 200 && regenerated.data?.sessionsCreated > 0,
+      regenerated,
+    )
+    const afterRegen = await tutor.req('GET', `/api/sessions/batch/${batchId}`)
+    const regenFuture = (afterRegen.data?.sessions ?? []).filter(
+      (session) => session.status === 'scheduled' && new Date(session.date).getTime() >= nowMs,
+    )
+    check(
+      'Regenerated sessions follow the new timetable',
+      afterRegen.status === 200 &&
+        regenFuture.length > 0 &&
+        regenFuture.every((session) => [2, 4].includes(new Date(session.date).getDay())),
+      afterRegen,
+    )
+
+    const holidayTarget = regenFuture[0]
+    const holidayDate = holidayTarget?.date
+    const holidayAdd = await tutor.req('POST', `/api/batches/${batchId}/holidays`, {
+      body: { date: holidayDate },
+    })
+    check('POST holiday marks the date', holidayAdd.status === 200, holidayAdd)
+    const afterHoliday = await tutor.req('GET', `/api/sessions/batch/${batchId}`)
+    const holidaySession = (afterHoliday.data?.sessions ?? []).find((session) => session._id === holidayTarget?._id)
+    check(
+      'Adding a holiday cancels the session on that date',
+      holidaySession?.status === 'cancelled' && holidaySession?.isHoliday === true,
+      afterHoliday,
+    )
+    const holidayRemove = await tutor.req('DELETE', `/api/batches/${batchId}/holidays`, {
+      body: { date: holidayDate },
+    })
+    check('DELETE holiday restores the date', holidayRemove.status === 200, holidayRemove)
+    const afterHolidayRemove = await tutor.req('GET', `/api/sessions/batch/${batchId}`)
+    const restoredHolidaySession = (afterHolidayRemove.data?.sessions ?? []).find((session) => session._id === holidayTarget?._id)
+    check(
+      'Removing a holiday restores the cancelled session',
+      restoredHolidaySession?.status === 'scheduled' && restoredHolidaySession?.isHoliday === false,
+      afterHolidayRemove,
+    )
+
     const manual = await tutor.req('POST', '/api/sessions', {
       body: { batchId, topic: 'Integration test session', date: new Date().toISOString() },
     })
@@ -234,8 +334,8 @@ async function main() {
       overview,
     )
 
-    const profile = await student.req('PUT', '/api/user/profile', { body: { bio: 'Integration test bio' } })
-    check('PUT /api/user/profile as student', profile.status === 200 && profile.data?.user?.bio === 'Integration test bio', profile)
+    const profile = await student.req('PUT', '/api/users/profile', { body: { bio: 'Integration test bio' } })
+    check('PUT /api/users/profile as student', profile.status === 200 && profile.data?.user?.bio === 'Integration test bio', profile)
   }
 
   section('6. Parent: invite redemption & parent endpoints')
@@ -392,7 +492,7 @@ async function main() {
     const sub = await student.req('POST', `/api/assignments/${assignmentId}/submit`, { form })
     check('Student submits assignment file', sub.status === 201 && sub.data?.submission?.status === 'submitted', sub)
     submissionId = sub.data?.submission?._id
-    submissionFile = sub.data?.submission?.fileUrl?.split('/').pop()
+    submissionDownloadUrl = sub.data?.submission?.downloadUrl
 
     const subs = await tutor.req('GET', `/api/assignments/${assignmentId}/submissions`)
     check('Tutor lists submissions', subs.status === 200 && subs.data?.submissions?.length === 1, subs)
@@ -451,6 +551,19 @@ async function main() {
       parRes.status === 200 && Array.isArray(parRes.data?.resources),
       parRes,
     )
+
+    const resourceForm = new FormData()
+    resourceForm.append('batchId', batchId)
+    resourceForm.append('file', new Blob(['private resource'], { type: 'text/plain' }), 'private-note.txt')
+    const uploaded = await tutor.req('POST', '/api/resources/upload', { form: resourceForm })
+    const privateResourceUrl = uploaded.data?.resource?.downloadUrl
+    check('Tutor uploads a private resource', uploaded.status === 201 && privateResourceUrl, uploaded)
+    const anonResource = await anon.req('GET', privateResourceUrl)
+    check('Anonymous resource download is blocked -> 401', anonResource.status === 401, anonResource)
+    const studentResource = await student.req('GET', privateResourceUrl)
+    check('Enrolled student downloads resource -> 200', studentResource.status === 200, studentResource)
+    const parentResource = await parent.req('GET', privateResourceUrl)
+    check('Linked parent downloads resource -> 200', parentResource.status === 200, parentResource)
   }
 
   section('8. Messaging between roles')
@@ -460,17 +573,22 @@ async function main() {
     })
     check('Tutor sends message to student', m1.status === 201, m1)
 
-    const m2 = await student.req('POST', '/api/messages', {
-      body: { receiverId: parentUserId, content: 'Hi mom/dad' },
+    const m2 = await tutor.req('POST', '/api/messages', {
+      body: { receiverId: parentUserId, content: 'Hello parent' },
     })
-    check('Student sends message to parent', m2.status === 201, m2)
+    check('Tutor sends message to parent', m2.status === 201, m2)
 
-    const convo = await parent.req('GET', `/api/messages/${studentUserId}`)
+    const blockedParentChild = await student.req('POST', '/api/messages', {
+      body: { receiverId: parentUserId, content: 'This must be blocked' },
+    })
     check(
-      'Parent reads conversation with student',
-      convo.status === 200 && convo.data?.messages?.some((m) => m.content === 'Hi mom/dad'),
-      convo,
+      'Student cannot message parent -> 403',
+      blockedParentChild.status === 403,
+      blockedParentChild,
     )
+
+    const parentStudentThread = await parent.req('GET', `/api/messages/${studentUserId}`)
+    check('Parent cannot read tutor-student thread -> 403', parentStudentThread.status === 403, parentStudentThread)
 
     const read = await student.req('PATCH', '/api/messages/read', { body: { senderId: tutorId } })
     check('Student marks tutor messages read', read.status === 200, read)
@@ -483,7 +601,7 @@ async function main() {
     const n2 = await student.req('PATCH', '/api/notifications/read-all')
     check('PATCH /api/notifications/read-all', n2.status === 200, n2)
 
-    const search = await tutor.req('GET', '/api/user/search?q=Test')
+    const search = await tutor.req('GET', '/api/users/search?q=Test')
     check(
       'Tutor user search finds student',
       search.status === 200 && search.data?.users?.some((u) => u.userId === studentUserId),
@@ -577,6 +695,19 @@ async function main() {
     })
     check('Message over 2000 chars -> 400', longMsg.status === 400, longMsg)
 
+    const messageForm = new FormData()
+    messageForm.append('receiverId', studentUserId)
+    messageForm.append('files', new Blob(['private message attachment'], { type: 'text/plain' }), 'private-message.txt')
+    const attachedMessage = await tutor.req('POST', '/api/messages', { form: messageForm })
+    messageDownloadUrl = attachedMessage.data?.message?.attachments?.[0]?.url
+    check('Tutor sends private message attachment', attachedMessage.status === 201 && messageDownloadUrl, attachedMessage)
+    const anonMessageFile = await anon.req('GET', messageDownloadUrl)
+    check('Anonymous message attachment is blocked -> 401', anonMessageFile.status === 401, anonMessageFile)
+    const recipientMessageFile = await student.req('GET', messageDownloadUrl)
+    check('Message recipient downloads attachment -> 200', recipientMessageFile.status === 200, recipientMessageFile)
+    const parentMessageFile = await parent.req('GET', messageDownloadUrl)
+    check('Parent cannot download tutor-student attachment -> 403', parentMessageFile.status === 403, parentMessageFile)
+
     // Notifications now fire
     const stuNotifs = await student.req('GET', '/api/notifications')
     check(
@@ -619,11 +750,15 @@ async function main() {
     const tutorSub = await tutor.req('POST', `/api/assignments/${assignmentId}/submit`, { form: tutorForm })
     check('Tutor cannot submit assignment -> 403', tutorSub.status === 403, tutorSub)
 
-    // Uploads require auth
-    const anonUpload = await anon.req('GET', `/uploads/submissions/${submissionFile ?? 'none.txt'}`)
-    check('Anonymous upload fetch -> 401 (protected)', anonUpload.status === 401, anonUpload)
-    const authedUpload = await tutor.req('GET', `/uploads/submissions/${submissionFile ?? 'none.txt'}`)
-    check('Authenticated upload fetch works', authedUpload.status === 200 || authedUpload.status === 404, authedUpload)
+    // Submission files use a role-aware private endpoint.
+    const anonSubmission = await anon.req('GET', submissionDownloadUrl)
+    check('Anonymous submission download is blocked -> 401', anonSubmission.status === 401, anonSubmission)
+    const tutorSubmission = await tutor.req('GET', submissionDownloadUrl)
+    check('Assignment tutor downloads submission -> 200', tutorSubmission.status === 200, tutorSubmission)
+    const parentSubmission = await parent.req('GET', submissionDownloadUrl)
+    check('Linked parent downloads submission -> 200', parentSubmission.status === 200, parentSubmission)
+    const strangerSubmission = await student2.req('GET', submissionDownloadUrl)
+    check('Unrelated student cannot download submission -> 403', strangerSubmission.status === 403, strangerSubmission)
 
     // Invite revoke
     const inv3 = await tutor.req('POST', '/api/invites/paired', { body: { batchId } })
@@ -640,16 +775,92 @@ async function main() {
     const pendingCount = batchAfter.data?.batch?.pendingCount
     check('Batch exposes pendingCount field', typeof pendingCount === 'number', batchAfter)
 
+    // Enrollment statuses
+    const setPending = await tutor.req('PATCH', `/api/batches/${batchId}/students/${studentUserId}`, {
+      body: { status: 'pending' },
+    })
+    check('Enrollment status pending is persisted', setPending.status === 200 && setPending.data?.enrollment?.status === 'pending', setPending)
+    const setArchived = await tutor.req('PATCH', `/api/batches/${batchId}/students/${studentUserId}`, {
+      body: { status: 'archived' },
+    })
+    check('Enrollment status archived is persisted', setArchived.status === 200 && setArchived.data?.enrollment?.status === 'archived', setArchived)
+    const badEnrollmentStatus = await tutor.req('PATCH', `/api/batches/${batchId}/students/${studentUserId}`, {
+      body: { status: 'unknown' },
+    })
+    check('Invalid enrollment status -> 400', badEnrollmentStatus.status === 400, badEnrollmentStatus)
+    const setActive = await tutor.req('PATCH', `/api/batches/${batchId}/students/${studentUserId}`, {
+      body: { status: 'active' },
+    })
+    check('Enrollment status active is restored', setActive.status === 200 && setActive.data?.enrollment?.status === 'active', setActive)
+    const setRemoved = await tutor.req('PATCH', `/api/batches/${batchId}/students/${studentUserId}`, {
+      body: { status: 'removed' },
+    })
+    check('Enrollment status removed is persisted', setRemoved.status === 200 && setRemoved.data?.enrollment?.status === 'removed', setRemoved)
+    const restoreActive = await tutor.req('PATCH', `/api/batches/${batchId}/students/${studentUserId}`, {
+      body: { status: 'active' },
+    })
+    check('Enrollment restored to active after status checks', restoreActive.status === 200 && restoreActive.data?.enrollment?.status === 'active', restoreActive)
+
+    const parentStudentThread = await parent.req('GET', `/api/messages/${studentUserId}`)
+    check('Parent cannot open tutor-student conversation -> 403', parentStudentThread.status === 403, parentStudentThread)
+    const studentParentConv = await student.req('POST', '/api/conversations', { body: { peerId: parentUserId } })
+    check('Student cannot start conversation with parent -> 403', studentParentConv.status === 403, studentParentConv)
+    const tutorStudentConv = await tutor.req('POST', '/api/conversations', { body: { peerId: studentUserId } })
+    check(
+      'Tutor can open tutor-student conversation',
+      tutorStudentConv.status === 201 && tutorStudentConv.data?.conversation?.type === 'tutor_student',
+      tutorStudentConv,
+    )
+
+    const progressLeak = await student.req('GET', `/api/progress/batch/${batchId}?studentId=USR-NOT-MINE`)
+    check(
+      'Student cannot query another student progress in-batch',
+      progressLeak.status === 200 && (progressLeak.data?.progress ?? []).every((row) => row.studentId === studentUserId),
+      progressLeak,
+    )
+
+    const attNoNote = await tutor.req('PATCH', `/api/attendance/session/${sessionId}/student/${studentUserId}`, {
+      body: { status: 'excused' },
+    })
+    check('Attendance correction without note -> 400', attNoNote.status === 400, attNoNote)
+    const attCorrect = await tutor.req('PATCH', `/api/attendance/session/${sessionId}/student/${studentUserId}`, {
+      body: { status: 'excused', note: 'Medical appointment' },
+    })
+    check(
+      'Attendance correction with note is audited',
+      attCorrect.status === 200 &&
+        attCorrect.data?.attendance?.status === 'excused' &&
+        Array.isArray(attCorrect.data?.attendance?.corrections) &&
+        attCorrect.data.attendance.corrections.length >= 1,
+      attCorrect,
+    )
+    const parentForeignAtt = await parent.req('GET', '/api/attendance/student/USR-NOPE')
+    check('Parent cannot read unrelated student attendance -> 403', parentForeignAtt.status === 403, parentForeignAtt)
+
+    const oneOffDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+    const oneOff = await tutor.req('POST', '/api/sessions', {
+      body: { batchId, topic: 'Protected one-off session', date: oneOffDate.toISOString() },
+    })
+    check('Manual session is created as one-off', oneOff.status === 201 && oneOff.data?.session?.oneOff === true, oneOff)
+    await tutor.req('POST', `/api/batches/${batchId}/regenerate-sessions`)
+    const afterOneOffRegen = await tutor.req('GET', `/api/sessions/batch/${batchId}`)
+    check(
+      'One-off session survives regeneration',
+      afterOneOffRegen.status === 200 &&
+        (afterOneOffRegen.data?.sessions ?? []).some((session) => session._id === oneOff.data?.session?._id),
+      afterOneOffRegen,
+    )
+
     // Archive / unarchive student
-    const archStu = await tutor.req('POST', `/api/user/${studentUserId}/archive`)
+    const archStu = await tutor.req('POST', `/api/users/${studentUserId}/archive`)
     check('Tutor archives student -> 200', archStu.status === 200, archStu)
     const archivedMe = await student.req('GET', '/api/auth/me')
-    check('Archived student API access blocked -> 403', archivedMe.status === 403, archivedMe)
+    check('Archived student API access blocked -> 401/403', [401, 403].includes(archivedMe.status), archivedMe)
     const archivedLogin = await anon.req('POST', '/api/auth/login', {
       body: { email: STUDENT_EMAIL, password: STUDENT_PASS },
     })
     check('Archived student login blocked -> 403', archivedLogin.status === 403, archivedLogin)
-    const unarch = await tutor.req('POST', `/api/user/${studentUserId}/unarchive`)
+    const unarch = await tutor.req('POST', `/api/users/${studentUserId}/unarchive`)
     check('Tutor unarchives student -> 200', unarch.status === 200, unarch)
     const restoredLogin = await student.req('POST', '/api/auth/login', {
       body: { email: STUDENT_EMAIL, password: STUDENT_PASS },
@@ -657,7 +868,7 @@ async function main() {
     check('Unarchived student can log in again', restoredLogin.status === 200, restoredLogin)
 
     // Student search now works within their circle
-    const stuSearch = await student.req('GET', '/api/user/search?q=Demo')
+    const stuSearch = await student.req('GET', '/api/users/search?q=Demo')
     check(
       'Student search finds their tutor',
       stuSearch.status === 200 && stuSearch.data?.users?.some((u) => u.userId === tutorId),

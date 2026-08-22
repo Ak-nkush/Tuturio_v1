@@ -1,8 +1,4 @@
 import { Router } from 'express'
-import multer from 'multer'
-import path from 'path'
-import fs from 'fs'
-import { fileURLToPath } from 'url'
 import { Assignment } from '../models/Assignment.js'
 import { Submission } from '../models/Submission.js'
 import { Batch } from '../models/Batch.js'
@@ -10,42 +6,15 @@ import { User } from '../models/User.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { validObjectIdParam } from '../utils/validate.js'
 import { notify, notifyMany } from '../services/notificationService.js'
+import { createUpload, SAFE_DOCUMENT_TYPES } from '../middleware/uploads.js'
+import { storeFile } from '../services/storageService.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const uploadsDir = path.join(__dirname, '../../uploads/submissions')
+const upload = createUpload({ allowedTypes: SAFE_DOCUMENT_TYPES, maxFileSize: 10 * 1024 * 1024 })
 
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true })
+function publicSubmission(submission) {
+  const value = submission.toObject ? submission.toObject() : submission
+  return { ...value, downloadUrl: `/api/files/submissions/${value._id}` }
 }
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
-    cb(null, `${Date.now()}-${safe}`)
-  },
-})
-
-// 10MB limit + safe file types (no HTML/SVG — prevents stored XSS via uploads)
-const ALLOWED_SUBMISSION_TYPES = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain',
-])
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_SUBMISSION_TYPES.has(file.mimetype)) cb(null, true)
-    else cb(new Error('File type not allowed. Only PDF, images, Word documents, and text files.'))
-  },
-})
 
 const router = Router()
 
@@ -136,7 +105,7 @@ router.get('/:assignmentId/submission/me', validObjectIdParam('assignmentId'), a
 
     if (!submission) return res.status(404).json({ error: 'Submission not found' })
 
-    res.json({ submission })
+    res.json({ submission: publicSubmission(submission) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -158,7 +127,7 @@ router.get('/:assignmentId/submission/student/:studentId', validObjectIdParam('a
 
     if (!submission) return res.status(404).json({ error: 'Submission not found' })
 
-    res.json({ submission })
+    res.json({ submission: publicSubmission(submission) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -174,7 +143,7 @@ router.get('/:assignmentId/submissions', requireRole('tutor'), validObjectIdPara
     }
 
     const submissions = await Submission.find({ assignmentId: assignment._id })
-    res.json({ submissions })
+    res.json({ submissions: submissions.map(publicSubmission) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -218,17 +187,26 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       attachments: Array.isArray(req.body.attachments) ? req.body.attachments : [],
     })
 
-    // Notify active students + their parents
-    const recipients = new Set()
+    const studentIds = []
+    const parentIds = []
     for (const e of batch.enrollment) {
       if (e.status !== 'active') continue
-      recipients.add(e.studentId)
-      if (e.parentId) recipients.add(e.parentId)
+      studentIds.push(e.studentId)
+      if (e.parentId) parentIds.push(e.parentId)
     }
-    await notifyMany([...recipients], {
+    await notifyMany(studentIds, {
       title: 'New assignment',
       message: `"${trimmedTitle}" was posted in ${batch.name}`,
       type: 'batch',
+      event: 'batch',
+      link: '/student/dashboard?tab=work',
+    })
+    await notifyMany(parentIds, {
+      title: 'New assignment',
+      message: `"${trimmedTitle}" was posted in ${batch.name}`,
+      type: 'batch',
+      event: 'batch',
+      link: '/parent/dashboard?tab=work',
     })
 
     res.status(201).json({ assignment })
@@ -254,10 +232,19 @@ router.post('/:assignmentId/submit', validObjectIdParam('assignmentId'), upload.
     const enrolled = batch?.enrollment.some((e) => e.studentId === req.user.userId && e.status === 'active')
     if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this batch' })
 
+    const stored = await storeFile({
+      buffer: req.file.buffer,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      folder: `submissions/${req.user.userId}`,
+    })
     const submission = await Submission.findOneAndUpdate(
       { assignmentId: assignment._id, studentId: req.user.userId },
       {
-        fileUrl: `/uploads/submissions/${req.file.filename}`,
+        storageKey: stored.storageKey,
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        sizeBytes: req.file.size,
         status: 'submitted',
         score: null,
         feedback: '',
@@ -265,7 +252,7 @@ router.post('/:assignmentId/submit', validObjectIdParam('assignmentId'), upload.
       { new: true, upsert: true },
     )
 
-    res.status(201).json({ submission })
+    res.status(201).json({ submission: publicSubmission(submission) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -304,9 +291,11 @@ router.patch('/submission/:submissionId/grade', requireRole('tutor'), validObjec
       title: 'Assignment graded',
       message: `"${assignment.title}" was graded: ${parsedScore}/${assignment.maxScore}`,
       type: 'student',
+      event: 'progress',
+      link: '/student/dashboard?tab=work',
     })
 
-    res.json({ submission })
+    res.json({ submission: publicSubmission(submission) })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })

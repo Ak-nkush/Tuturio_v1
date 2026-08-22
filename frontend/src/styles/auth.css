@@ -78,6 +78,14 @@
   color: #e8a23c;
 }
 
+.settings-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--rule);
+}
+
 .auth-error {
   background: rgba(199, 123, 148, 0.15);
   border: 1px solid var(--parent);

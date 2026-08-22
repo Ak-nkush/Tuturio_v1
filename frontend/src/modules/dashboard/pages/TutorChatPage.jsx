@@ -4,8 +4,9 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSocket } from '../../../context/SocketContext'
 import '../../../styles/dashboard.css'
 
-export function TutorChatPage() {
+export function TutorChatPage({ embedded = false }) {
   const { user } = useAuth()
+  const isLearner = user?.role === 'student' || user?.role === 'parent'
   const [contacts, setContacts] = useState([])
   const [conversations, setConversations] = useState([])
   const [activeId, setActiveId] = useState('')
@@ -114,16 +115,24 @@ export function TutorChatPage() {
 
   return (
     <div>
-      <div className="dashboard-header">
-        <span className="eyebrow">Private</span>
-        <h1>Chat</h1>
-        <p>Message students and parents with text or safe file attachments.</p>
-      </div>
+      {!embedded && (
+        <div className="dashboard-header">
+          <span className="eyebrow">Private</span>
+          <h1>Chat</h1>
+          <p>
+            {isLearner
+              ? 'Private messages with your tutor. Students and parents cannot message each other here.'
+              : 'Message students and parents with text or safe file attachments.'}
+          </p>
+        </div>
+      )}
       {error && <div className="alert error">{error}</div>}
       <div className="chat-layout">
         <aside className="chat-list premium-card">
           {people.length === 0 ? (
-            <p className="text-muted">No contacts yet. Invite students to a batch first.</p>
+            <p className="text-muted">
+              {isLearner ? 'No tutor conversation yet. You will see your tutor here after you join a batch.' : 'No contacts yet. Invite students to a batch first.'}
+            </p>
           ) : (
             people.map((person) => (
               <button
@@ -133,7 +142,10 @@ export function TutorChatPage() {
                 onClick={() => setActiveId(person.userId)}
               >
                 <strong>{person.name}</strong>
-                <small>{person.role}{person.unread ? ` · ${person.unread} new` : ''}</small>
+                <small>
+                  {person.type === 'tutor_parent' ? 'Parent thread' : person.type === 'tutor_student' ? 'Student thread' : person.role}
+                  {person.unread ? ` · ${person.unread} new` : ''}
+                </small>
                 {person.lastMessage && <p>{person.lastMessage}</p>}
               </button>
             ))
@@ -141,7 +153,11 @@ export function TutorChatPage() {
         </aside>
         <section className="chat-thread premium-card">
           {!activeId ? (
-            <div className="empty-state">Select a student or parent to start a private conversation.</div>
+            <div className="empty-state">
+              {isLearner
+                ? 'Select your tutor to start a private conversation.'
+                : 'Select a student or parent to start a private conversation.'}
+            </div>
           ) : (
             <>
               <div className="chat-messages">

@@ -6,10 +6,16 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "seed:tutor": "node src/scripts/seedTutor.js"
+    "seed:tutor": "node src/scripts/seedTutor.js",
+    "test:integration": "node tests/api-integration.test.mjs",
+    "dev:local": "concurrently -k -n api,web \"npm run dev\" \"npm run dev --prefix ../frontend\"",
+    "verify:local": "npm run seed:tutor && concurrently -k --success first -n api,test \"npm start\" \"node scripts/waitForHealth.js && npm run test:integration\"",
+    "dev:docker": "docker compose -f ../docker-compose.yml up -d mongo && npm run dev:local"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.10.1",
+    "concurrently": "^9.2.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

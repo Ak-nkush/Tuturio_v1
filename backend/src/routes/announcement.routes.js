@@ -60,17 +60,26 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       attachments: req.body.attachments ?? [],
     })
 
-    const recipients = new Set()
+    const studentIds = []
+    const parentIds = []
     for (const row of batch.enrollment) {
       if (row.status !== 'active') continue
-      recipients.add(row.studentId)
-      if (row.parentId) recipients.add(row.parentId)
+      studentIds.push(row.studentId)
+      if (row.parentId) parentIds.push(row.parentId)
     }
-    await notifyMany([...recipients], {
+    await notifyMany(studentIds, {
       title: 'New announcement',
       message: `Notice posted in "${batch.name}"`,
       type: 'batch',
       event: 'announcements',
+      link: '/student/dashboard?tab=materials',
+    })
+    await notifyMany(parentIds, {
+      title: 'New announcement',
+      message: `Notice posted in "${batch.name}"`,
+      type: 'batch',
+      event: 'announcements',
+      link: '/parent/dashboard?tab=materials',
     })
 
     res.status(201).json({ announcement })

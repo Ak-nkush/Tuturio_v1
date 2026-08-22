@@ -22,6 +22,9 @@ const userSchema = new Schema(
       announcements: { type: Boolean, default: true },
       batch: { type: Boolean, default: true },
     },
+    bio: { type: String, default: '', trim: true },
+    phone: { type: String, default: '', trim: true },
+    profilePicture: { type: String, default: null },
   },
   { timestamps: true },
 )
@@ -34,6 +37,8 @@ export function publicUser(user) {
     name: user.name,
     role: user.role,
     email: user.email,
+    bio: user.bio ?? '',
+    profilePictureUrl: user.profilePicture ? `/api/files/profiles/${user.userId}` : null,
     linkedStudentIds: user.linkedStudentIds,
     status: user.status,
     notificationPreferences: user.notificationPreferences ?? {

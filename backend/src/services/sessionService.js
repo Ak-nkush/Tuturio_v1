@@ -19,6 +19,103 @@ function buildSessionDate(day, timeStr) {
   return sessionDate
 }
 
+function calendarDayKey(date) {
+  const value = new Date(date)
+  return `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`
+}
+
+function parseClock(timeStr) {
+  const [hours, minutes] = String(timeStr || '18:00').split(':').map(Number)
+  return { hours: hours || 18, minutes: minutes || 0 }
+}
+
+function clocksMatch(date, timeStr) {
+  const value = new Date(date)
+  const clock = parseClock(timeStr)
+  return value.getHours() === clock.hours && value.getMinutes() === clock.minutes
+}
+
+function sessionSummary(session) {
+  return {
+    _id: session._id,
+    date: session.date,
+    topic: session.topic,
+  }
+}
+
+export function computeProposedSessionDates(batch, schedule, weeksAhead = 4) {
+  const days = schedule?.days ?? []
+  const time = schedule?.time ?? '18:00'
+  if (!days.length) return []
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const endDate = new Date(today.getTime() + weeksAhead * 7 * DAY_MS)
+  const dates = []
+
+  for (let cursor = new Date(today); cursor <= endDate; cursor = new Date(cursor.getTime() + DAY_MS)) {
+    if (!days.includes(cursor.getDay())) continue
+    if (isHolidayDate(cursor, batch.holidays)) continue
+    dates.push(buildSessionDate(cursor, time))
+  }
+
+  return dates
+}
+
+export async function previewScheduleChange(batch, nextSchedule, weeksAhead = 4) {
+  const now = new Date()
+  const existing = await Session.find({
+    batchId: batch.batchId,
+    status: 'scheduled',
+    date: { $gte: now },
+  }).sort({ date: 1 }).lean()
+
+  const proposedDates = computeProposedSessionDates(batch, nextSchedule, weeksAhead)
+    .filter((date) => date >= now)
+  const proposedByDay = new Map(proposedDates.map((date) => [calendarDayKey(date), date]))
+  const existingByDay = new Map(existing.map((session) => [calendarDayKey(session.date), session]))
+
+  const toRemove = []
+  const toModify = []
+  const unchanged = []
+
+  for (const session of existing) {
+    const proposed = proposedByDay.get(calendarDayKey(session.date))
+    if (!proposed) {
+      toRemove.push(sessionSummary(session))
+      continue
+    }
+    if (clocksMatch(session.date, nextSchedule?.time)) {
+      unchanged.push(sessionSummary(session))
+    } else {
+      toModify.push({
+        existing: sessionSummary(session),
+        proposed: { date: proposed, time: nextSchedule?.time ?? '18:00' },
+      })
+    }
+  }
+
+  const toCreate = proposedDates
+    .filter((date) => !existingByDay.has(calendarDayKey(date)))
+    .map((date) => ({ date, time: nextSchedule?.time ?? '18:00' }))
+
+  return {
+    currentSchedule: batch.schedule,
+    proposedSchedule: nextSchedule,
+    toRemove,
+    toCreate,
+    toModify,
+    unchanged,
+    weeksAhead,
+    counts: {
+      toRemove: toRemove.length,
+      toCreate: toCreate.length,
+      toModify: toModify.length,
+      unchanged: unchanged.length,
+    },
+  }
+}
+
 export async function generateSessionsForBatch(batch, weeksAhead = 4) {
   const schedule = batch.schedule ?? { days: [], time: '18:00' }
   if (!schedule.days?.length) return []
@@ -66,6 +163,7 @@ export async function regenerateFutureSessions(batch, weeksAhead = 4) {
     batchId: batch.batchId,
     status: 'scheduled',
     date: { $gte: now },
+    oneOff: { $ne: true },
   })
   return generateSessionsForBatch(batch, weeksAhead)
 }

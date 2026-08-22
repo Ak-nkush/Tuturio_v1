@@ -21,6 +21,8 @@ import resourceRoutes from './routes/resource.routes.js'
 import sessionRoutes from './routes/session.routes.js'
 import userRoutes from './routes/user.routes.js'
 import subjectRoutes from './routes/subject.routes.js'
+import conversationRoutes from './routes/conversation.routes.js'
+import fileRoutes from './routes/files.routes.js'
 import { initSocket } from './services/socketService.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -44,8 +46,6 @@ app.use(
 )
 app.use(express.json())
 app.use(cookieParser())
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')))
-
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' })
 })
@@ -64,6 +64,20 @@ app.use('/api/resources', resourceRoutes)
 app.use('/api/sessions', sessionRoutes)
 app.use('/api/subjects', subjectRoutes)
 app.use('/api/users', userRoutes)
+app.use('/api/files', fileRoutes)
+app.use('/api/conversations', conversationRoutes)
+
+// Multer forwards rejected uploads as errors. Keep the response deliberate and
+// avoid exposing a server stack trace for unsupported files or oversized files.
+app.use((error, _req, res, next) => {
+  if (error?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ error: 'File is too large' })
+  }
+  if (error?.message === 'File type not allowed') {
+    return res.status(400).json({ error: 'File type not allowed' })
+  }
+  return next(error)
+})
 
 async function start() {
   await connectDb()

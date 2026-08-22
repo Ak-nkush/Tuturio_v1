@@ -1,7 +1,8 @@
 import { verifyAccessToken } from '../utils/tokens.js'
 import { User } from '../models/User.js'
+import { areRelated } from './relationshipService.js'
 
-const activeUsers = new Map() // userId -> Set of socketIds (handles multiple browser tabs/sessions)
+const activeUsers = new Map()
 let ioInstance = null
 
 function parseCookies(cookieHeader) {
@@ -16,10 +17,13 @@ function parseCookies(cookieHeader) {
   return list
 }
 
+function conversationRoom(userA, userB) {
+  return `dm:${[userA, userB].sort().join(':')}`
+}
+
 export function initSocket(io) {
   ioInstance = io
 
-  // Authenticate socket connections using JWT from HTTP-only cookies
   io.use(async (socket, next) => {
     try {
       const cookieHeader = socket.handshake.headers.cookie
@@ -58,7 +62,15 @@ export function initSocket(io) {
     }
     activeUsers.get(userId).add(socket.id)
 
-    console.log(`[SOCKET] User connected: ${userId} (socketId: ${socket.id})`)
+    socket.on('conversation:join', async (peerId, ack) => {
+      const allowed = await areRelated(userId, String(peerId ?? ''))
+      if (!allowed) {
+        if (typeof ack === 'function') ack({ ok: false, error: 'Forbidden' })
+        return
+      }
+      socket.join(conversationRoom(userId, peerId))
+      if (typeof ack === 'function') ack({ ok: true })
+    })
 
     socket.on('disconnect', () => {
       const sockets = activeUsers.get(userId)
@@ -68,12 +80,10 @@ export function initSocket(io) {
           activeUsers.delete(userId)
         }
       }
-      console.log(`[SOCKET] User disconnected: ${userId} (socketId: ${socket.id})`)
     })
   })
 }
 
-// Sends an event to all active sockets of a specific user
 export function emitToUser(userId, event, data) {
   const sockets = activeUsers.get(userId)
   if (sockets && ioInstance) {
@@ -82,3 +92,4 @@ export function emitToUser(userId, event, data) {
     }
   }
 }
+

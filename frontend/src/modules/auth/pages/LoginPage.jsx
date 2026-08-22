@@ -77,6 +77,8 @@ export function LoginPage() {
       <div className="auth-links login-create">
         Are you new? <span>Ask your tutor for an invite</span>
         <br />
+        New tutor? <Link to="/auth/register">Create your tutor account</Link>
+        <br />
         <Link to="/">Back to home</Link>
       </div>
     </AuthLayout>
