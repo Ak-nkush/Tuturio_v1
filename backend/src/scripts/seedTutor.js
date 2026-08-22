@@ -20,6 +20,14 @@ async function seedTutor() {
   let tutor = await User.findOne({ role: 'tutor' })
 
   if (tutor) {
+    if (tutor.name === 'Demo Tutor') {
+      tutor.name = env.tutorName === 'Demo Tutor' ? 'Ananya Sharma' : env.tutorName
+      if (!tutor.bio) {
+        tutor.bio = 'Physics for grades 9–12. Board exams and JEE foundation, weekday evenings.'
+      }
+      await tutor.save()
+      console.log('Updated seeded tutor profile:', tutor.name)
+    }
     console.log('Tutor already exists:', tutor.email)
   } else {
     const userId = await generateUserId()

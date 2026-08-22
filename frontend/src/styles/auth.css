@@ -50,7 +50,8 @@
   color: var(--chalk-dim);
 }
 
-.auth-field input {
+.auth-field input,
+.auth-field textarea {
   width: 100%;
   padding: 12px 14px;
   border-radius: 8px;
@@ -60,9 +61,30 @@
   font: inherit;
 }
 
-.auth-field input:focus {
+.auth-field textarea {
+  resize: vertical;
+  min-height: 88px;
+}
+
+.auth-field input:focus,
+.auth-field textarea:focus {
   outline: none;
   border-color: var(--teacher);
+}
+
+.auth-field input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  flex-shrink: 0;
+  accent-color: var(--teacher);
+}
+
+.auth-field input[type="file"] {
+  width: auto;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
 }
 
 .auth-hint {

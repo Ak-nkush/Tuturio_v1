@@ -7,7 +7,7 @@ import { InvitePage } from '../modules/auth/pages/InvitePage'
 import { LoginPage } from '../modules/auth/pages/LoginPage'
 import { ResetPasswordPage } from '../modules/auth/pages/ResetPasswordPage'
 import { RegisterPage } from '../modules/auth/pages/RegisterPage'
-import { AccountSettingsPage } from '../modules/auth/pages/AccountSettingsPage'
+import { AccountSettingsPage, AccountSettingsRedirect } from '../modules/auth/pages/AccountSettingsPage'
 import { BatchDetailsPage } from '../modules/dashboard/pages/BatchDetailsPage'
 import { SessionWorkspacePage } from '../modules/dashboard/pages/SessionWorkspacePage'
 import { TutorChatPage } from '../modules/dashboard/pages/TutorChatPage'
@@ -40,7 +40,7 @@ export function AppRoutes() {
             path="/account/settings"
             element={
               <ProtectedRoute>
-                <AccountSettingsPage />
+                <AccountSettingsRedirect />
               </ProtectedRoute>
             }
           />
@@ -59,6 +59,7 @@ export function AppRoutes() {
             <Route path="chat" element={<TutorChatPage />} />
             <Route path="notifications" element={<TutorNotificationsPage />} />
             <Route path="analytics" element={<TutorAnalyticsPage />} />
+            <Route path="settings" element={<AccountSettingsPage />} />
             <Route path="sessions/:sessionId" element={<SessionWorkspacePage />} />
           </Route>
           <Route

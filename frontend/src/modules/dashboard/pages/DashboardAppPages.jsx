@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Outlet, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useSocket } from '../../../context/SocketContext'
 import {
@@ -50,11 +50,7 @@ function greetingFor(date) {
 }
 
 export function TutorDashboardShell() {
-  return (
-    <TutorDashboardLayout>
-      <Outlet />
-    </TutorDashboardLayout>
-  )
+  return <TutorDashboardLayout />
 }
 
 export function TutorOverviewPage() {
@@ -73,21 +69,35 @@ export function TutorOverviewPage() {
   })
 
   useEffect(() => {
-    Promise.all([
-      batchApi.list(),
-      sessionApi.today(),
-      analyticsApi.overview(),
-      notificationApi.list().catch(() => ({ notifications: [] })),
-      messageApi.conversations().catch(() => ({ conversations: [] })),
-    ])
-      .then(([batchRes, sessionRes, overview, notes, chats]) => {
-        setBatches(usableBatches(batchRes.batches))
-        setSessions((sessionRes.sessions ?? []).filter((session) => !isTestRecord(session)))
-        setAnalytics(overview)
-        setUnreadNotes((notes.notifications ?? []).filter((n) => !n.isRead).length)
-        setUnreadChats((chats.conversations ?? []).reduce((sum, c) => sum + (c.unread ?? 0), 0))
-      })
-      .catch((err) => setError(err.message))
+    let cancelled = false
+    async function load() {
+      const results = await Promise.allSettled([
+        batchApi.list(),
+        sessionApi.today(),
+        analyticsApi.overview(),
+        notificationApi.list(),
+        messageApi.conversations(),
+      ])
+      if (cancelled) return
+      const [batchRes, sessionRes, overview, notes, chats] = results
+      if (batchRes.status === 'fulfilled') setBatches(usableBatches(batchRes.value.batches))
+      if (sessionRes.status === 'fulfilled') {
+        setSessions((sessionRes.value.sessions ?? []).filter((session) => !isTestRecord(session)))
+      }
+      if (overview.status === 'fulfilled') setAnalytics(overview.value)
+      if (notes.status === 'fulfilled') {
+        setUnreadNotes((notes.value.notifications ?? []).filter((n) => !n.isRead).length)
+      }
+      if (chats.status === 'fulfilled') {
+        setUnreadChats((chats.value.conversations ?? []).reduce((sum, c) => sum + (c.unread ?? 0), 0))
+      }
+      const failed = results.find((result) => result.status === 'rejected')
+      if (failed) setError(failed.reason?.message ?? 'Could not load the dashboard')
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const firstName = user?.name?.split(' ')[0] ?? 'there'

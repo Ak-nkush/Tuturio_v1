@@ -1,11 +1,16 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect } from 'react'
 import { GrainOverlay } from '../../../components/layout/GrainOverlay'
 import { useAuth } from '../../../context/AuthContext'
 import '../../../styles/dashboard.css'
 import '../../../styles/auth.css'
 
 export function TutorDashboardLayout() {
-  const { user, logout } = useAuth()
+  const { user, logout, refreshUser } = useAuth()
+
+  useEffect(() => {
+    refreshUser().catch(() => {})
+  }, [refreshUser])
 
   return (
     <div className="dashboard-layout">
@@ -15,7 +20,13 @@ export function TutorDashboardLayout() {
         <div className="sidebar-header">
           <h2>Tuturio</h2>
           <div className="user-profile">
-            <span className="user-avatar">{user?.name?.charAt(0).toUpperCase()}</span>
+            <span className="user-avatar">
+              {user?.profilePictureUrl ? (
+                <img src={user.profilePictureUrl} alt="" />
+              ) : (
+                user?.name?.charAt(0).toUpperCase()
+              )}
+            </span>
             <div className="user-info">
               <span className="user-name">{user?.name}</span>
               <span className="user-role">Tutor</span>
@@ -75,7 +86,7 @@ export function TutorDashboardLayout() {
             Analytics
           </NavLink>
           <NavLink
-            to="/account/settings"
+            to="/tutor/dashboard/settings"
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="nav-icon">⚙</span>

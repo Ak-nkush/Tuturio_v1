@@ -19,7 +19,7 @@ export const env = {
   inviteDefaultExpiryDays: Number(process.env.INVITE_DEFAULT_EXPIRY_DAYS ?? 7),
   tutorEmail: process.env.TUTOR_EMAIL ?? 'tutor@tuturio.local',
   tutorPassword: process.env.TUTOR_PASSWORD ?? 'ChangeMeNow123456!',
-  tutorName: process.env.TUTOR_NAME ?? 'Demo Tutor',
+  tutorName: process.env.TUTOR_NAME ?? 'Ananya Sharma',
   smtpHost: process.env.SMTP_HOST ?? '',
   smtpPort: Number(process.env.SMTP_PORT ?? 587),
   smtpSecure: process.env.SMTP_SECURE === 'true',
