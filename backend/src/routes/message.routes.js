@@ -1,11 +1,12 @@
 import { Router } from 'express'
 import { Message } from '../models/Message.js'
+import { Notification } from '../models/Notification.js'
 import { User } from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
 import { messageRateLimiter } from '../middleware/rateLimit.js'
 import { areRelated, conversationTypeForRoles } from '../services/relationshipService.js'
 import { notify } from '../services/notificationService.js'
-import { emitToUser } from '../services/socketService.js'
+import { emitToUser, isUserOnline } from '../services/socketService.js'
 import { createUpload, SAFE_DOCUMENT_TYPES } from '../middleware/uploads.js'
 import { storeFile } from '../services/storageService.js'
 
@@ -15,11 +16,24 @@ function publicMessage(message) {
   const value = message.toObject ? message.toObject() : message
   return {
     ...value,
+    isRead: Boolean(value.isRead),
+    isDelivered: Boolean(value.isDelivered || value.isRead),
     attachments: (value.attachments ?? []).map((file, index) => ({
       ...file,
       url: `/api/files/messages/${value._id}/${index}`,
     })),
   }
+}
+
+async function markThreadSeen(readerId, senderId) {
+  const now = new Date()
+  await Message.updateMany(
+    { senderId, receiverId: readerId, $or: [{ isRead: false }, { isDelivered: false }] },
+    { $set: { isRead: true, isDelivered: true, deliveredAt: now, readAt: now } },
+  )
+  emitToUser(senderId, 'messages:delivered', { recipientId: readerId })
+  emitToUser(senderId, 'messages:read', { readerId })
+  await Notification.deleteMany({ userId: readerId, event: 'messages', isRead: false })
 }
 
 function optionalFiles(req, res, next) {
@@ -138,6 +152,8 @@ router.get('/:userId', async (req, res) => {
       return res.status(403).json({ error: 'You can only message people in your batches' })
     }
 
+    await markThreadSeen(req.user.userId, otherUserId)
+
     const messages = await Message.find({
       $or: [
         { senderId: req.user.userId, receiverId: otherUserId },
@@ -192,18 +208,22 @@ router.post('/', messageRateLimiter, optionalFiles, async (req, res) => {
       }
     }))
 
+    const delivered = isUserOnline(receiverId)
+    const now = new Date()
     const message = await Message.create({
       senderId: req.user.userId,
       receiverId,
       content,
       attachments,
+      isDelivered: delivered,
+      deliveredAt: delivered ? now : null,
     })
 
     const chatLink =
       receiver.role === 'parent'
-        ? '/parent/dashboard?tab=chat'
+        ? '/parent/dashboard/chat'
         : receiver.role === 'student'
-          ? '/student/dashboard?tab=chat'
+          ? '/student/dashboard/chat'
           : '/tutor/dashboard/chat'
     await notify(receiverId, {
       title: 'New message',
@@ -231,13 +251,7 @@ router.patch('/read', async (req, res) => {
     const senderId = String(req.body.senderId ?? '')
     if (!senderId) return res.status(400).json({ error: 'senderId is required' })
 
-    await Message.updateMany(
-      { senderId, receiverId: req.user.userId, isRead: false },
-      { $set: { isRead: true } },
-    )
-
-    // Notify the sender that their messages have been read
-    emitToUser(senderId, 'messages:read', { readerId: req.user.userId })
+    await markThreadSeen(req.user.userId, senderId)
 
     res.json({ message: 'Messages marked as read' })
   } catch (error) {

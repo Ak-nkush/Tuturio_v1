@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { announcementApi, attendanceApi, progressApi, resourceApi } from '../../../lib/api'
+import { announcementApi, attendanceApi, progressApi, resourceApi, formatDate, formatDateTime } from '../../../lib/api'
 
 export function AnnouncementBoard({ batchId, items, onChange }) {
   const [text, setText] = useState('')
@@ -56,7 +56,7 @@ export function AnnouncementBoard({ batchId, items, onChange }) {
           {items.map((item) => (
             <li key={item._id} className="announcement-item">
               <p>{item.text}</p>
-              <span className="text-muted text-sm">{new Date(item.createdAt).toLocaleString()}</span>
+              <span className="text-muted text-sm">{formatDateTime(item.createdAt)}</span>
               <button type="button" className="danger-button" onClick={() => remove(item._id)}>
                 Delete
               </button>
@@ -158,7 +158,7 @@ export function ResourceBoard({ batchId, items, onChange }) {
                 {item.title}
                 {item.type === 'link' ? ' (link)' : ''}
               </a>
-              <span className="text-muted text-sm">{new Date(item.createdAt).toLocaleDateString()}</span>
+              <span className="text-muted text-sm">{formatDate(item.createdAt)}</span>
               <button type="button" className="danger-button" onClick={() => remove(item._id)}>
                 Delete
               </button>
@@ -432,7 +432,7 @@ export function AttendanceHistory({ student, batchId, onClose }) {
               {rows.map((row) => (
                 <tr key={row._id}>
                   <td>
-                    {row.sessionDate ? new Date(row.sessionDate).toLocaleString() : '—'}
+                    {row.sessionDate ? formatDate(row.sessionDate) : '—'}
                   </td>
                   <td>{row.sessionTopic ?? '—'}</td>
                   <td>
@@ -444,6 +444,7 @@ export function AttendanceHistory({ student, batchId, onClose }) {
                       <option value="present">Present</option>
                       <option value="absent">Absent</option>
                       <option value="late">Late</option>
+                      <option value="excused">Excused</option>
                     </select>
                   </td>
                   <td>

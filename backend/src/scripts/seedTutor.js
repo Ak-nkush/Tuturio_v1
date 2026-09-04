@@ -1,9 +1,8 @@
 import dotenv from 'dotenv'
 import { connectDb } from '../db/connect.js'
 import { User } from '../models/User.js'
-import { Batch } from '../models/Batch.js'
 import { env } from '../config/env.js'
-import { generateBatchId, generateUserId } from '../utils/ids.js'
+import { generateUserId } from '../utils/ids.js'
 import { hashPassword, normalizeEmail, validatePassword } from '../utils/password.js'
 
 dotenv.config()
@@ -17,46 +16,36 @@ async function seedTutor() {
     throw new Error(`TUTOR_PASSWORD invalid: ${passwordError}`)
   }
 
-  let tutor = await User.findOne({ role: 'tutor' })
+  const extras = await User.find({ role: 'tutor' }).sort({ createdAt: 1 })
+  let tutor = extras[0] ?? null
+  if (extras.length > 1) {
+    await User.deleteMany({ role: 'tutor', userId: { $ne: tutor.userId } })
+    console.log(`Removed ${extras.length - 1} extra tutor account(s). This classroom has one tutor.`)
+  }
+
+  const passwordHash = await hashPassword(env.tutorPassword)
 
   if (tutor) {
-    if (tutor.name === 'Demo Tutor') {
-      tutor.name = env.tutorName === 'Demo Tutor' ? 'Ananya Sharma' : env.tutorName
-      if (!tutor.bio) {
-        tutor.bio = 'Physics for grades 9–12. Board exams and JEE foundation, weekday evenings.'
-      }
-      await tutor.save()
-      console.log('Updated seeded tutor profile:', tutor.name)
-    }
-    console.log('Tutor already exists:', tutor.email)
+    tutor.name = env.tutorName
+    tutor.email = email
+    tutor.passwordHash = passwordHash
+    tutor.tokenVersion = (tutor.tokenVersion ?? 0) + 1
+    await tutor.save()
+    console.log('Updated the classroom tutor:', tutor.name, tutor.email)
   } else {
-    const userId = await generateUserId()
     tutor = await User.create({
-      userId,
+      userId: await generateUserId(),
       name: env.tutorName,
       email,
       role: 'tutor',
-      passwordHash: await hashPassword(env.tutorPassword),
+      passwordHash,
     })
-    console.log('Created tutor:', tutor.email, `(userId: ${tutor.userId})`)
+    console.log('Created the classroom tutor:', tutor.name, tutor.email, `(userId: ${tutor.userId})`)
   }
 
-  let batch = await Batch.findOne({ tutorId: tutor.userId, status: 'active' })
-  if (!batch) {
-    const batchId = await generateBatchId()
-    batch = await Batch.create({
-      batchId,
-      tutorId: tutor.userId,
-      name: 'Grade 10 Math — Evening',
-      subjects: ['Algebra', 'Geometry'],
-    })
-    console.log('Created sample batch:', batch.name, `(batchId: ${batch.batchId})`)
-  } else {
-    console.log('Sample batch already exists:', batch.name)
-  }
-
-  console.log('\nSeed complete.')
+  console.log('\nThis app has one tutor.')
   console.log('Login at', `${env.clientUrl}/auth/login`)
+  console.log('Name:', env.tutorName)
   console.log('Email:', email)
   console.log('Password:', env.tutorPassword)
 

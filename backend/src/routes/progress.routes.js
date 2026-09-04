@@ -195,7 +195,7 @@ async function notifyManySafe(recipients, batchName, topic) {
     message: `New progress entry for "${batchName}": ${topic}`,
     type: 'student',
     event: 'progress',
-    link: '/student/dashboard?tab=work',
+    link: '/student/dashboard/attendance',
   })
   if (parentId) {
     await notifyMany([parentId], {
@@ -203,7 +203,7 @@ async function notifyManySafe(recipients, batchName, topic) {
       message: `New progress entry for "${batchName}": ${topic}`,
       type: 'student',
       event: 'progress',
-      link: '/parent/dashboard?tab=work',
+      link: '/parent/dashboard/attendance',
     })
   }
 }

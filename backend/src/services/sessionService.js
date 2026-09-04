@@ -116,7 +116,7 @@ export async function previewScheduleChange(batch, nextSchedule, weeksAhead = 4)
   }
 }
 
-export async function generateSessionsForBatch(batch, weeksAhead = 4) {
+export async function generateSessionsForBatch(batch, weeksAhead = 4, topic) {
   const schedule = batch.schedule ?? { days: [], time: '18:00' }
   if (!schedule.days?.length) return []
 
@@ -125,6 +125,7 @@ export async function generateSessionsForBatch(batch, weeksAhead = 4) {
   today.setHours(0, 0, 0, 0)
 
   const endDate = new Date(today.getTime() + weeksAhead * 7 * DAY_MS)
+  const classTopic = String(topic ?? '').trim() || `${batch.name} — Class`
 
   for (let cursor = new Date(today); cursor <= endDate; cursor = new Date(cursor.getTime() + DAY_MS)) {
     if (!schedule.days.includes(cursor.getDay())) continue
@@ -147,7 +148,7 @@ export async function generateSessionsForBatch(batch, weeksAhead = 4) {
       batchId: batch.batchId,
       tutorId: batch.tutorId,
       date: sessionDate,
-      topic: `${batch.name} — Class`,
+      topic: classTopic,
       status: 'scheduled',
       isHoliday: false,
     })
@@ -157,7 +158,7 @@ export async function generateSessionsForBatch(batch, weeksAhead = 4) {
   return created
 }
 
-export async function regenerateFutureSessions(batch, weeksAhead = 4) {
+export async function regenerateFutureSessions(batch, weeksAhead = 4, topic) {
   const now = new Date()
   await Session.deleteMany({
     batchId: batch.batchId,
@@ -165,5 +166,5 @@ export async function regenerateFutureSessions(batch, weeksAhead = 4) {
     date: { $gte: now },
     oneOff: { $ne: true },
   })
-  return generateSessionsForBatch(batch, weeksAhead)
+  return generateSessionsForBatch(batch, weeksAhead, topic)
 }

@@ -21,6 +21,8 @@ npm run verify:local
 
 Copy `backend/.env.example` to `backend/.env` before first use. Local development uses private local file storage; production requires Cloudinary credentials and `STORAGE_PROVIDER=cloudinary`.
 
+To send invite emails to Gmail, set `SMTP_HOST=smtp.gmail.com`, `SMTP_USER` to the sending Gmail address, and `SMTP_PASSWORD` to a Gmail **App Password** (not the normal Gmail password). Restart the API after saving.
+
 If Docker Desktop is installed, `npm run dev:docker` starts MongoDB from the repo-root `docker-compose.yml`, then runs the API and frontend.
 
 ## Production

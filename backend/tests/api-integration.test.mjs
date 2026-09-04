@@ -5,7 +5,7 @@ const BASE = process.env.API_BASE ?? 'http://localhost:5000'
 const TS = Date.now().toString(36)
 
 const TUTOR_EMAIL = 'tutor@tuturio.local'
-const TUTOR_PASS = 'ChangeMeNow123456!'
+const TUTOR_PASS = 'MeeraJoshi8'
 const STUDENT_EMAIL = `student.${TS}@test.local`
 const STUDENT_PASS = 'StudentPass123456!'
 const PARENT_EMAIL = `parent.${TS}@test.local`
@@ -69,8 +69,8 @@ async function main() {
   console.log(`Testing API at ${BASE}`)
 
   // Cross-section state
-  let tutorId, batchId, studentCode, parentCode, linkedStudentId
-  let studentUserId, parentUserId
+  let tutorId, tutorName, batchId, studentCode, parentCode, linkedStudentId
+  let studentUserId, parentUserId, parentName
   let sessionId, assignmentId, submissionId, progressId, announcementId, resourceId, submissionDownloadUrl, messageDownloadUrl
 
   section('1. Health & unauthenticated access')
@@ -99,6 +99,7 @@ async function main() {
       login,
     )
     tutorId = login.data?.user?.userId
+    tutorName = login.data?.user?.name
 
     const me = await tutor.req('GET', '/api/auth/me')
     check('GET /api/auth/me as tutor', me.status === 200 && me.data?.user?.email === TUTOR_EMAIL, me)
@@ -264,6 +265,21 @@ async function main() {
       today.status === 200 && Array.isArray(today.data?.sessions) && today.data.sessions.length > 0,
       today,
     )
+    const calFrom = new Date()
+    calFrom.setHours(0, 0, 0, 0)
+    const calTo = new Date()
+    calTo.setHours(23, 59, 59, 999)
+    const calendar = await tutor.req(
+      'GET',
+      `/api/sessions/calendar?from=${encodeURIComponent(calFrom.toISOString())}&to=${encodeURIComponent(calTo.toISOString())}&batchId=${batchId}`,
+    )
+    check(
+      'GET /api/sessions/calendar returns sessions in range',
+      calendar.status === 200 && Array.isArray(calendar.data?.sessions) && calendar.data.sessions.length > 0,
+      calendar,
+    )
+    const calendarBad = await tutor.req('GET', '/api/sessions/calendar')
+    check('GET /api/sessions/calendar without dates is 400', calendarBad.status === 400, calendarBad)
   }
 
   section('4. Tutor: paired invites (student + parent)')
@@ -291,7 +307,7 @@ async function main() {
   section('5. Student: invite redemption & student endpoints')
   {
     const redeem = await student.req('POST', `/api/invites/${studentCode}/redeem`, {
-      body: { name: 'Test Student', email: STUDENT_EMAIL, password: STUDENT_PASS },
+      body: { password: STUDENT_PASS },
     })
     check(
       'Student redeem creates account (201, role=student)',
@@ -326,6 +342,19 @@ async function main() {
       upcoming.status === 200 && Array.isArray(upcoming.data?.sessions) && upcoming.data.sessions.length > 0,
       upcoming,
     )
+    const calFrom = new Date()
+    calFrom.setHours(0, 0, 0, 0)
+    const calTo = new Date()
+    calTo.setFullYear(calTo.getFullYear() + 1)
+    const studentCal = await student.req(
+      'GET',
+      `/api/sessions/calendar?from=${encodeURIComponent(calFrom.toISOString())}&to=${encodeURIComponent(calTo.toISOString())}`,
+    )
+    check(
+      'GET /api/sessions/calendar as student returns sessions',
+      studentCal.status === 200 && Array.isArray(studentCal.data?.sessions),
+      studentCal,
+    )
 
     const overview = await student.req('GET', '/api/analytics/student/overview')
     check(
@@ -341,7 +370,7 @@ async function main() {
   section('6. Parent: invite redemption & parent endpoints')
   {
     const redeem = await parent.req('POST', `/api/invites/${parentCode}/redeem`, {
-      body: { name: 'Test Parent', email: PARENT_EMAIL, password: PARENT_PASS },
+      body: { password: PARENT_PASS },
     })
     check(
       'Parent redeem creates account (201, role=parent)',
@@ -349,6 +378,7 @@ async function main() {
       redeem,
     )
     parentUserId = redeem.data?.user?.userId
+    parentName = redeem.data?.user?.name
 
     const me = await parent.req('GET', '/api/auth/me')
     check(
@@ -376,6 +406,19 @@ async function main() {
       'GET /api/sessions/parent/upcoming returns sessions',
       upcoming.status === 200 && Array.isArray(upcoming.data?.sessions) && upcoming.data.sessions.length > 0,
       upcoming,
+    )
+    const calFrom = new Date()
+    calFrom.setHours(0, 0, 0, 0)
+    const calTo = new Date()
+    calTo.setFullYear(calTo.getFullYear() + 1)
+    const parentCal = await parent.req(
+      'GET',
+      `/api/sessions/calendar?from=${encodeURIComponent(calFrom.toISOString())}&to=${encodeURIComponent(calTo.toISOString())}&studentId=${studentUserId}`,
+    )
+    check(
+      'GET /api/sessions/calendar as parent returns sessions',
+      parentCal.status === 200 && Array.isArray(parentCal.data?.sessions),
+      parentCal,
     )
 
     const overview = await parent.req('GET', '/api/analytics/parent/overview')
@@ -432,11 +475,7 @@ async function main() {
     )
 
     const secondRedeem = await secondChild.req('POST', `/api/invites/${secondStudentCode}/redeem`, {
-      body: {
-        name: 'Second Test Student',
-        email: SECOND_CHILD_EMAIL,
-        password: SECOND_CHILD_PASS,
-      },
+      body: { password: SECOND_CHILD_PASS },
     })
     check(
       'Student redeems after parent-first link and receives reserved id',
@@ -513,6 +552,18 @@ async function main() {
     )
     const pSub = await parent.req('GET', `/api/assignments/${assignmentId}/submission/student/${studentUserId}`)
     check('Parent views student submission', pSub.status === 200 && pSub.data?.submission?.score === 92, pSub)
+
+    const pAsgChild = await parent.req('GET', `/api/assignments/parent/students?studentId=${studentUserId}`)
+    check(
+      'Parent assignment list includes status and grade for the selected child',
+      pAsgChild.status === 200 &&
+        pAsgChild.data?.assignments?.some(
+          (a) => a._id === assignmentId && a.submission?.status === 'graded' && a.submission?.score === 92,
+        ),
+      pAsgChild,
+    )
+    const studentAsParent = await student.req('GET', '/api/assignments/parent/students')
+    check('Student cannot use parent assignment endpoint -> 403', studentAsParent.status === 403, studentAsParent)
 
     // Progress
     const prog = await tutor.req('POST', '/api/progress', {
@@ -612,7 +663,7 @@ async function main() {
     check(
       'GET /api/batches/students/all includes student with parent name',
       allStudents.status === 200 &&
-        allStudents.data?.students?.some((s) => s.studentId === studentUserId && s.parentName === 'Test Parent'),
+        allStudents.data?.students?.some((s) => s.studentId === studentUserId && s.parentName === parentName && s.parentId === parentUserId),
       allStudents,
     )
 
@@ -819,10 +870,14 @@ async function main() {
       progressLeak,
     )
 
-    const attNoNote = await tutor.req('PATCH', `/api/attendance/session/${sessionId}/student/${studentUserId}`, {
-      body: { status: 'excused' },
+    const attPresentToAbsent = await tutor.req('PATCH', `/api/attendance/session/${sessionId}/student/${studentUserId}`, {
+      body: { status: 'absent' },
     })
-    check('Attendance correction without note -> 400', attNoNote.status === 400, attNoNote)
+    check(
+      'Tutor can change present to absent without a note',
+      attPresentToAbsent.status === 200 && attPresentToAbsent.data?.attendance?.status === 'absent',
+      attPresentToAbsent,
+    )
     const attCorrect = await tutor.req('PATCH', `/api/attendance/session/${sessionId}/student/${studentUserId}`, {
       body: { status: 'excused', note: 'Medical appointment' },
     })
@@ -868,7 +923,7 @@ async function main() {
     check('Unarchived student can log in again', restoredLogin.status === 200, restoredLogin)
 
     // Student search now works within their circle
-    const stuSearch = await student.req('GET', '/api/users/search?q=Demo')
+    const stuSearch = await student.req('GET', `/api/users/search?q=${encodeURIComponent(String(tutorName).slice(0, 8))}`)
     check(
       'Student search finds their tutor',
       stuSearch.status === 200 && stuSearch.data?.users?.some((u) => u.userId === tutorId),

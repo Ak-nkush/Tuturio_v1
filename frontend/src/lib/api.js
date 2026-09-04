@@ -110,6 +110,14 @@ export const batchApi = {
 
 export const sessionApi = {
   today: () => apiFetch('/api/sessions/today'),
+  calendar: ({ from, to, batchId, studentId } = {}) => {
+    const params = new URLSearchParams()
+    if (from) params.set('from', from)
+    if (to) params.set('to', to)
+    if (batchId) params.set('batchId', batchId)
+    if (studentId) params.set('studentId', studentId)
+    return apiFetch(`/api/sessions/calendar?${params.toString()}`)
+  },
   byBatch: (batchId) => apiFetch(`/api/sessions/batch/${batchId}`),
   upcomingForStudent: () => apiFetch('/api/sessions/student/upcoming'),
   upcomingForParent: () => apiFetch('/api/sessions/parent/upcoming'),
@@ -122,6 +130,7 @@ export const sessionApi = {
 
 export const attendanceApi = {
   getBySession: (sessionId) => apiFetch(`/api/attendance/session/${sessionId}`),
+  byBatch: (batchId) => apiFetch(`/api/attendance/batch/${batchId}`),
   save: (sessionId, body) =>
     apiFetch(`/api/attendance/session/${sessionId}`, { method: 'POST', body: JSON.stringify(body) }),
   remove: (sessionId, studentId) =>
@@ -180,9 +189,25 @@ export const analyticsApi = {
 export const assignmentApi = {
   byBatch: (batchId) => apiFetch(`/api/assignments/batch/${batchId}`),
   student: () => apiFetch('/api/assignments/student/me'),
+  parent: (studentId) => {
+    const params = studentId ? `?studentId=${encodeURIComponent(studentId)}` : ''
+    return apiFetch(`/api/assignments/parent/students${params}`)
+  },
+  parentSubmission: (assignmentId, studentId) =>
+    apiFetch(`/api/assignments/${assignmentId}/submission/student/${studentId}`),
+  mySubmission: (assignmentId) => apiFetch(`/api/assignments/${assignmentId}/submission/me`),
+  submissions: (assignmentId) => apiFetch(`/api/assignments/${assignmentId}/submissions`),
   create: (body) => apiFetch('/api/assignments', { method: 'POST', body: JSON.stringify(body) }),
-  submit: (assignmentId, body) =>
-    apiFetch(`/api/assignments/${assignmentId}/submit`, { method: 'POST', body }),
+  submit: (assignmentId, file) => {
+    const body = new FormData()
+    body.append('file', file)
+    return apiFetch(`/api/assignments/${assignmentId}/submit`, { method: 'POST', body })
+  },
+  grade: (submissionId, body) =>
+    apiFetch(`/api/assignments/submission/${submissionId}/grade`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 }
 
 export const notificationApi = {
@@ -255,6 +280,21 @@ async function downloadCsv(path) {
 
 export const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+export function formatDate(value) {
+  if (!value) return '—'
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+export function formatDateTime(value) {
+  if (!value) return '—'
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  const time = date.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit' })
+  return `${formatDate(date)}, ${time}`
+}
+
 export function formatSchedule(schedule) {
   const days = (schedule?.days ?? []).map((day) => DAY_LABELS[day]).filter(Boolean)
   const time = schedule?.time
@@ -284,4 +324,10 @@ export function dashboardPath(role) {
   if (role === 'tutor') return '/tutor/dashboard'
   if (role === 'parent') return '/parent/dashboard'
   return '/student/dashboard'
+}
+
+export function postLoginPath(role, from) {
+  const home = dashboardPath(role)
+  if (typeof from !== 'string' || !from.startsWith(home)) return home
+  return from
 }

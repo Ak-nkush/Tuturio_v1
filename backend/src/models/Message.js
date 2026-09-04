@@ -17,6 +17,9 @@ const messageSchema = new Schema(
       default: [],
     },
     isRead: { type: Boolean, default: false },
+    isDelivered: { type: Boolean, default: false },
+    deliveredAt: { type: Date, default: null },
+    readAt: { type: Date, default: null },
   },
   { timestamps: true }
 )

@@ -78,6 +78,73 @@ router.get('/student/me', async (req, res) => {
   }
 })
 
+router.get('/batch/:batchId', requireRole('tutor'), async (req, res) => {
+  try {
+    const batch = await Batch.findOne({
+      batchId: req.params.batchId,
+      tutorId: req.user.userId,
+      status: 'active',
+    })
+    if (!batch) return res.status(404).json({ error: 'Batch not found' })
+
+    const activeStudents = batch.enrollment.filter((row) => row.status === 'active')
+    const studentIds = activeStudents.map((row) => row.studentId)
+    const users = await User.find({ userId: { $in: studentIds } })
+    const nameById = Object.fromEntries(users.map((user) => [user.userId, user.name]))
+
+    const classes = await Session.find({
+      batchId: batch.batchId,
+      isHoliday: { $ne: true },
+      status: { $ne: 'cancelled' },
+    }).sort({ date: -1 }).limit(40)
+
+    const records = await Attendance.find({ batchId: batch.batchId })
+    const withMeta = await withSessionMeta(records)
+
+    const students = studentIds.map((studentId) => {
+      const rows = records.filter((row) => row.studentId === studentId)
+      const present = rows.filter((row) => row.status === 'present').length
+      const late = rows.filter((row) => row.status === 'late').length
+      const absent = rows.filter((row) => row.status === 'absent').length
+      const excused = rows.filter((row) => row.status === 'excused').length
+      const attended = present + late
+      const percentage = rows.length > 0 ? Math.round((attended / rows.length) * 100) : null
+      return {
+        studentId,
+        name: nameById[studentId] ?? studentId,
+        present,
+        late,
+        absent,
+        excused,
+        marked: rows.length,
+        attendancePercentage: percentage,
+      }
+    })
+
+    const classRows = classes.map((session) => {
+      const sessionRecords = records.filter((row) => String(row.sessionId) === String(session._id))
+      return {
+        sessionId: String(session._id),
+        date: session.date,
+        topic: session.topic,
+        status: session.status,
+        markedCount: sessionRecords.length,
+        expectedCount: studentIds.length,
+      }
+    })
+
+    res.json({
+      batchId: batch.batchId,
+      students,
+      classes: classRows,
+      records: withMeta,
+    })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 router.get('/parent/students', async (req, res) => {
   try {
     const parent = await User.findOne({ userId: req.user.userId })
@@ -158,13 +225,11 @@ router.post('/session/:sessionId', requireRole('tutor'), validObjectIdParam('ses
       for (const record of records) {
         const existing = await Attendance.findOne({ sessionId, studentId: record.studentId })
         if (existing && existing.status !== record.status) {
-          if (!String(record.note ?? '').trim()) {
-            return res.status(400).json({ error: 'A correction note is required when changing saved attendance' })
-          }
+          const note = String(record.note ?? '').trim() || `Changed from ${existing.status} to ${record.status}`
           existing.corrections.push({
             previousStatus: existing.status,
             newStatus: record.status,
-            note: String(record.note).trim(),
+            note,
             changedBy: req.user.userId,
             changedAt: new Date(),
           })
@@ -193,14 +258,14 @@ router.post('/session/:sessionId', requireRole('tutor'), validObjectIdParam('ses
         message: `Attendance was marked for "${batch.name}"`,
         type: 'student',
         event: 'attendance',
-        link: '/student/dashboard?tab=work',
+        link: '/student/dashboard/attendance',
       })
       await notifyMany(enrolledRows.map((row) => row.parentId).filter(Boolean), {
         title: 'Attendance recorded',
         message: `Attendance was marked for "${batch.name}"`,
         type: 'student',
         event: 'attendance',
-        link: '/parent/dashboard?tab=work',
+        link: '/parent/dashboard/attendance',
       })
     }
 
@@ -225,8 +290,7 @@ router.patch('/session/:sessionId/student/:studentId', requireRole('tutor'), val
     if (!record) return res.status(404).json({ error: 'Attendance record not found' })
 
     if (record.status !== status) {
-      const note = String(req.body.note ?? '').trim()
-      if (!note) return res.status(400).json({ error: 'A correction note is required' })
+      const note = String(req.body.note ?? '').trim() || `Changed from ${record.status} to ${status}`
       record.corrections.push({
         previousStatus: record.status,
         newStatus: status,

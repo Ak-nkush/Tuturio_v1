@@ -96,7 +96,7 @@ const roleCards = [
     eyebrow: 'For Parents',
     title: 'Every child, one dashboard.',
     description:
-      'Switch between kids in one place — attendance, notes and progress for each, plus a private line to the tutor. Their one-on-one chat with the tutor stays theirs.',
+      'Switch between kids in one place — attendance, assignments and progress for each, plus a private line to the tutor. Their one-on-one chat with the tutor stays theirs.',
     cta: 'I have an invite link',
     to: '/auth/login',
   },

@@ -54,6 +54,88 @@ router.get('/today', requireRole('tutor'), async (req, res) => {
   }
 })
 
+const CALENDAR_MAX_MS = 370 * 24 * 60 * 60 * 1000
+
+async function calendarBatchIdsForUser(req) {
+  const requestedBatchId = String(req.query.batchId ?? '').trim()
+  const requestedStudentId = String(req.query.studentId ?? '').trim()
+  const role = req.user.role
+
+  if (role === 'tutor') {
+    const activeBatches = await Batch.find({ tutorId: req.user.userId, status: 'active' })
+    let batchIds = activeBatches.map((batch) => batch.batchId)
+    if (requestedBatchId) {
+      if (!batchIds.includes(requestedBatchId)) return { status: 404, error: 'Batch not found' }
+      batchIds = [requestedBatchId]
+    }
+    return { batchIds }
+  }
+
+  if (role === 'student') {
+    const batches = await Batch.find({
+      status: 'active',
+      enrollment: { $elemMatch: { studentId: req.user.userId, status: 'active' } },
+    })
+    let batchIds = batches.map((batch) => batch.batchId)
+    if (requestedBatchId) {
+      if (!batchIds.includes(requestedBatchId)) return { status: 404, error: 'Batch not found' }
+      batchIds = [requestedBatchId]
+    }
+    return { batchIds }
+  }
+
+  if (role === 'parent') {
+    const parent = await User.findOne({ userId: req.user.userId })
+    if (!parent) return { status: 404, error: 'User not found' }
+    let studentIds = parent.linkedStudentIds ?? []
+    if (requestedStudentId) {
+      if (!studentIds.includes(requestedStudentId)) return { status: 403, error: 'Forbidden' }
+      studentIds = [requestedStudentId]
+    }
+    const batches = await Batch.find({
+      status: 'active',
+      enrollment: { $elemMatch: { studentId: { $in: studentIds }, status: 'active' } },
+    })
+    let batchIds = batches.map((batch) => batch.batchId)
+    if (requestedBatchId) {
+      if (!batchIds.includes(requestedBatchId)) return { status: 404, error: 'Batch not found' }
+      batchIds = [requestedBatchId]
+    }
+    return { batchIds }
+  }
+
+  return { status: 403, error: 'Forbidden' }
+}
+
+router.get('/calendar', async (req, res) => {
+  try {
+    const from = req.query.from ? new Date(req.query.from) : null
+    const to = req.query.to ? new Date(req.query.to) : null
+    if (!from || !to || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      return res.status(400).json({ error: 'from and to dates are required' })
+    }
+    if (to < from) return res.status(400).json({ error: 'to must be after from' })
+    if (to.getTime() - from.getTime() > CALENDAR_MAX_MS) {
+      return res.status(400).json({ error: 'Date range cannot exceed one year' })
+    }
+
+    const resolved = await calendarBatchIdsForUser(req)
+    if (resolved.status) return res.status(resolved.status).json({ error: resolved.error })
+
+    const query = {
+      batchId: { $in: resolved.batchIds },
+      date: { $gte: from, $lte: to },
+    }
+    if (req.user.role === 'tutor') query.tutorId = req.user.userId
+
+    const sessions = await Session.find(query).sort({ date: 1 }).limit(2500)
+    res.json({ sessions, from, to })
+  } catch (error) {
+    console.error('Error fetching calendar sessions:', error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 router.get('/batch/:batchId', async (req, res) => {
   try {
     const batch = await Batch.findOne({ batchId: req.params.batchId, status: 'active' })

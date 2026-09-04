@@ -14,7 +14,6 @@ import {
   verifyRefreshToken,
 } from '../utils/tokens.js'
 import { generateResetToken, hashResetToken, sendPasswordResetEmail } from '../utils/email.js'
-import { generateUserId } from '../utils/ids.js'
 import { env } from '../config/env.js'
 import { requireAuth } from '../middleware/auth.js'
 import { forgotPasswordRateLimiter, loginRateLimiter } from '../middleware/rateLimit.js'
@@ -23,38 +22,10 @@ const router = Router()
 
 const GENERIC_RESET_MESSAGE = 'If that email is registered, a reset link has been sent.'
 
-router.post('/register', loginRateLimiter, async (req, res) => {
-  const name = String(req.body.name ?? '').trim()
-  const email = normalizeEmail(String(req.body.email ?? ''))
-  const password = String(req.body.password ?? '')
-
-  if (!name || !email || !password) {
-    return res.status(400).json({ message: 'Name, email, and password are required' })
-  }
-  if (name.length > 80) {
-    return res.status(400).json({ message: 'Name is too long' })
-  }
-
-  const passwordError = validatePassword(password)
-  if (passwordError) return res.status(400).json({ message: passwordError })
-
-  const existing = await User.findOne({ email })
-  if (existing) {
-    return res.status(409).json({ message: 'An account with this email already exists' })
-  }
-
-  const user = await User.create({
-    userId: await generateUserId(),
-    name,
-    email,
-    role: 'tutor',
-    passwordHash: await hashPassword(password),
+router.post('/register', loginRateLimiter, async (_req, res) => {
+  return res.status(403).json({
+    message: 'This classroom already has a tutor. Students and parents join with an invite link.',
   })
-
-  const accessToken = signAccessToken(user)
-  const refreshToken = signRefreshToken(user)
-  setAuthCookies(res, accessToken, refreshToken)
-  return res.status(201).json({ user: publicUser(user) })
 })
 
 router.post('/login', loginRateLimiter, async (req, res) => {

@@ -19,8 +19,16 @@ function inviteResponse(invite, batch) {
   }
 }
 
+function displayNameFromEmail(email) {
+  const local = String(email ?? '').split('@')[0] || 'Member'
+  const words = local.replace(/[._+\-]+/g, ' ').trim()
+  if (!words) return 'Member'
+  return words.replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 function normalizeOptionalEmail(value) {
-  return value ? normalizeEmail(String(value)) : null
+  const raw = String(value ?? '').trim()
+  return raw ? normalizeEmail(raw) : null
 }
 
 async function createInvite({ batch, role, linkedStudentId = null, email = null, expiryDays, pairedInviteId = null }) {
@@ -125,8 +133,6 @@ router.get('/:code', async (req, res) => {
 
 router.post('/:code/redeem', optionalAuth, async (req, res) => {
   const code = req.params.code
-  const name = String(req.body.name ?? '').trim()
-  const email = normalizeEmail(String(req.body.email ?? ''))
   const password = String(req.body.password ?? '')
 
   const preview = await validateInviteCode(code)
@@ -135,6 +141,9 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
   }
 
   const { invite, batchName } = preview
+  const requestedEmail = normalizeEmail(String(req.body.email ?? ''))
+  const email = invite.email ? normalizeEmail(invite.email) : requestedEmail
+  const name = String(req.body.name ?? '').trim() || (email ? displayNameFromEmail(email) : '')
 
   if (req.user && req.user.role !== invite.role) {
     return res.status(409).json({
@@ -179,8 +188,13 @@ router.post('/:code/redeem', optionalAuth, async (req, res) => {
     })
   }
 
-  if (!name || !email || !password) {
-    return res.status(400).json({ message: 'Name, email, and password are required' })
+  if (!email || !password) {
+    return res.status(400).json({ message: invite.email ? 'Password is required' : 'Email and password are required' })
+  }
+
+  const requestedName = String(req.body.name ?? '').trim()
+  if (requestedName && (requestedName.length < 2 || requestedName.length > 80)) {
+    return res.status(400).json({ message: 'Username must be between 2 and 80 characters' })
   }
 
   const passwordError = validatePassword(password)
@@ -383,7 +397,8 @@ router.post('/:code/send', requireAuth, requireRole('tutor'), async (req, res) =
     return res.json({ message: 'Invite email sent successfully' })
   } catch (err) {
     console.error('Failed to send invite email:', err)
-    return res.status(500).json({ message: 'Failed to send invite email' })
+    const setup = /not set up yet/i.test(err.message)
+    return res.status(setup ? 503 : 500).json({ message: err.message || 'Failed to send invite email' })
   }
 })
 

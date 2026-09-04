@@ -1,15 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DAY_LABELS, batchApi, formatSchedule, subjectApi } from '../../../lib/api'
-
-function formatSessionStamp(value) {
-  return new Date(value).toLocaleString([], {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
+import { DAY_LABELS, batchApi, formatDateTime, formatSchedule, subjectApi } from '../../../lib/api'
 
 function PreviewList({ items, empty, renderItem, itemKey }) {
   const list = items ?? []
@@ -28,10 +18,18 @@ function PreviewList({ items, empty, renderItem, itemKey }) {
   )
 }
 
+function localDateTimeValue(value = new Date()) {
+  const date = new Date(value)
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
+  return date.toISOString().slice(0, 16)
+}
+
 const EMPTY_FORM = {
   name: '',
   days: [],
   time: '18:00',
+  classTopic: '',
+  weeksAhead: 4,
 }
 
 export function BatchFormModal({ batch, onClose, onSave }) {
@@ -42,6 +40,8 @@ export function BatchFormModal({ batch, onClose, onSave }) {
           name: batch.name,
           days: batch.schedule?.days ?? [],
           time: batch.schedule?.time ?? '18:00',
+          classTopic: '',
+          weeksAhead: 4,
         }
       : EMPTY_FORM,
   )
@@ -53,6 +53,8 @@ export function BatchFormModal({ batch, onClose, onSave }) {
   const [schedulePreview, setSchedulePreview] = useState(null)
   const [pendingPayload, setPendingPayload] = useState(null)
   const [weeksAhead, setWeeksAhead] = useState(4)
+  const [extraClasses, setExtraClasses] = useState([])
+  const [extraDraft, setExtraDraft] = useState({ topic: '', date: localDateTimeValue() })
 
   useEffect(() => {
     subjectApi
@@ -77,6 +79,12 @@ export function BatchFormModal({ batch, onClose, onSave }) {
         name: form.name.trim(),
         subjects: selected,
         schedule: { days: form.days, time: form.time },
+        classTopic: (form.classTopic ?? '').trim(),
+        weeksAhead: Number(form.weeksAhead ?? 4),
+        extraClasses: extraClasses.map((item) => ({
+          topic: item.topic,
+          date: new Date(item.date).toISOString(),
+        })),
       }
       if (isEdit) {
         const prevDays = JSON.stringify([...(batch.schedule?.days ?? [])].map(Number).sort())
@@ -85,7 +93,7 @@ export function BatchFormModal({ batch, onClose, onSave }) {
         if (scheduleChanged) {
           const res = await batchApi.previewScheduleChange(batch.batchId, {
             schedule: payload.schedule,
-            weeksAhead,
+            weeksAhead: Number(form.weeksAhead ?? 4),
           })
           setPendingPayload(payload)
           setSchedulePreview(res.preview)
@@ -127,7 +135,7 @@ export function BatchFormModal({ batch, onClose, onSave }) {
         <p className="modal-sub">
           {schedulePreview
             ? 'Review the sessions that will change. Nothing is updated until you choose an action.'
-            : 'Set subjects and weekly schedule. Sessions auto-generate for the next 4 weeks.'}
+            : 'Set subjects, weekly class days, and any extra classes. Weekly classes are created with this batch.'}
         </p>
 
         {schedulePreview ? (
@@ -178,7 +186,7 @@ export function BatchFormModal({ batch, onClose, onSave }) {
                   items={schedulePreview.toRemove}
                   empty="No future sessions fall off this timetable."
                   itemKey={(session) => session._id ?? session.date}
-                  renderItem={(session) => `${formatSessionStamp(session.date)}${session.topic ? ` · ${session.topic}` : ''}`}
+                  renderItem={(session) => `${formatDateTime(session.date)}${session.topic ? ` · ${session.topic}` : ''}`}
                 />
               </section>
               <section>
@@ -187,7 +195,7 @@ export function BatchFormModal({ batch, onClose, onSave }) {
                   items={schedulePreview.toCreate}
                   empty="No new sessions in this window."
                   itemKey={(session) => session.date}
-                  renderItem={(session) => formatSessionStamp(session.date)}
+                  renderItem={(session) => formatDateTime(session.date)}
                 />
               </section>
               <section>
@@ -197,7 +205,7 @@ export function BatchFormModal({ batch, onClose, onSave }) {
                   empty="No existing sessions change time."
                   itemKey={(item) => item.existing?._id ?? item.proposed?.date}
                   renderItem={(item) =>
-                    `${formatSessionStamp(item.existing?.date)} → ${formatSessionStamp(item.proposed?.date)}`
+                    `${formatDateTime(item.existing?.date)} → ${formatDateTime(item.proposed?.date)}`
                   }
                 />
               </section>
@@ -308,6 +316,77 @@ export function BatchFormModal({ batch, onClose, onSave }) {
             />
           </div>
 
+          <div className="auth-field">
+            <label htmlFor="class-topic">Class topic</label>
+            <input
+              id="class-topic"
+              value={form.classTopic ?? ''}
+              onChange={(e) => setForm({ ...form, classTopic: e.target.value })}
+              placeholder="Used for the weekly classes created with this batch"
+            />
+          </div>
+
+          <div className="auth-field">
+            <label htmlFor="class-weeks">Create weekly classes for</label>
+            <select
+              id="class-weeks"
+              value={form.weeksAhead ?? 4}
+              onChange={(e) => {
+                const next = Number(e.target.value)
+                setForm({ ...form, weeksAhead: next })
+                setWeeksAhead(next)
+              }}
+            >
+              <option value={4}>Next 4 weeks</option>
+              <option value={8}>Next 8 weeks</option>
+              <option value={12}>Next 12 weeks</option>
+            </select>
+          </div>
+
+          <div className="auth-field">
+            <label>Extra class (optional)</label>
+            <p className="text-muted text-sm">Add a one-off class for this batch, not a separate schedule.</p>
+            <div className="invite-grid mt-4">
+              <input
+                value={extraDraft.topic}
+                onChange={(e) => setExtraDraft({ ...extraDraft, topic: e.target.value })}
+                placeholder="Topic"
+              />
+              <input
+                type="datetime-local"
+                value={extraDraft.date}
+                onChange={(e) => setExtraDraft({ ...extraDraft, date: e.target.value })}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn-outline mt-4"
+              onClick={() => {
+                if (!extraDraft.topic.trim() || !extraDraft.date) return
+                setExtraClasses((current) => [...current, { ...extraDraft, topic: extraDraft.topic.trim() }])
+                setExtraDraft({ topic: '', date: localDateTimeValue() })
+              }}
+            >
+              Add extra class
+            </button>
+            {extraClasses.length > 0 && (
+              <ul className="session-list-mini mt-4">
+                {extraClasses.map((item, index) => (
+                  <li key={`${item.date}-${index}`}>
+                    <span>{item.topic} · {formatDateTime(item.date)}</span>
+                    <button
+                      type="button"
+                      className="danger-button"
+                      onClick={() => setExtraClasses((current) => current.filter((_, i) => i !== index))}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           <div className="modal-actions">
             <button type="button" className="btn-outline" onClick={onClose}>
               Cancel
@@ -318,87 +397,6 @@ export function BatchFormModal({ batch, onClose, onSave }) {
           </div>
         </form>
         )}
-      </div>
-    </div>
-  )
-}
-
-export function ScheduleClassModal({ batches, onClose, onSave }) {
-  const [batchId, setBatchId] = useState(batches[0]?.batchId ?? '')
-  const [topic, setTopic] = useState('')
-  const [date, setDate] = useState(() => {
-    const d = new Date()
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-    return d.toISOString().slice(0, 16)
-  })
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setError('')
-    setSaving(true)
-    try {
-      await onSave({ batchId, topic: topic.trim(), date: new Date(date).toISOString() })
-      onClose()
-    } catch (err) {
-      setError(err?.message ?? 'Could not schedule class')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <h2>Schedule class</h2>
-        <p className="modal-sub">Create a one-off session outside the recurring schedule.</p>
-
-        <form onSubmit={handleSubmit}>
-          {error && <div className="auth-error">{error}</div>}
-
-          <div className="auth-field">
-            <label htmlFor="session-batch">Batch</label>
-            <select id="session-batch" value={batchId} onChange={(e) => setBatchId(e.target.value)} required>
-              {batches.map((b) => (
-                <option key={b.batchId} value={b.batchId}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="auth-field">
-            <label htmlFor="session-topic">Topic</label>
-            <input
-              id="session-topic"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="Chapter 5 — Algebra"
-              required
-            />
-          </div>
-
-          <div className="auth-field">
-            <label htmlFor="session-date">Date & time</label>
-            <input
-              id="session-date"
-              type="datetime-local"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="modal-actions">
-            <button type="button" className="btn-outline" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="auth-btn" disabled={saving || !batchId}>
-              {saving ? 'Scheduling…' : 'Schedule class'}
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   )

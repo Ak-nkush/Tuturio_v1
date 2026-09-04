@@ -11,6 +11,10 @@
   --parent: #c77b94;
   --rule: rgba(244, 241, 230, 0.14);
   --radius: 14px;
+  --primary: #6fb6c1;
+  --primary-rgb: 111, 182, 193;
+  --text: #f4f1e6;
+  --text-muted: #b9c2bc;
 }
 
 * {
@@ -35,3 +39,24 @@ body {
 a {
   color: inherit;
 }
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  line-height: 0;
+  background: transparent;
+}
+
+.brand-logo-img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.brand-logo-img.size-sm,
+.brand-logo-img.size-md,
+.brand-logo-img.size-lg { height: 4rem; }

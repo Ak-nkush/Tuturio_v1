@@ -29,6 +29,43 @@ function parseSchedule(body) {
   return { days, time }
 }
 
+function parseWeeksAhead(value) {
+  const weeks = Number(value ?? 4)
+  return [4, 8, 12].includes(weeks) ? weeks : 4
+}
+
+function parseClassTopic(value, fallback) {
+  const topic = String(value ?? '').trim()
+  return topic || fallback
+}
+
+function parseExtraClasses(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => ({
+      topic: String(item?.topic ?? '').trim(),
+      date: item?.date ? new Date(item.date) : null,
+    }))
+    .filter((item) => item.topic && item.date && !Number.isNaN(item.date.getTime()))
+}
+
+async function createExtraClasses(batch, extras) {
+  const created = []
+  for (const extra of extras) {
+    created.push(
+      await Session.create({
+        batchId: batch.batchId,
+        tutorId: batch.tutorId,
+        date: extra.date,
+        topic: extra.topic,
+        status: 'scheduled',
+        oneOff: true,
+      }),
+    )
+  }
+  return created
+}
+
 function schedulesMatch(a, b) {
   const leftDays = [...(a?.days ?? [])].map(Number).sort().join(',')
   const rightDays = [...(b?.days ?? [])].map(Number).sort().join(',')
@@ -195,11 +232,17 @@ router.post('/', requireRole('tutor'), async (req, res) => {
     })
 
     let sessionsCreated = []
+    const classTopic = parseClassTopic(req.body.classTopic, `${name} — Class`)
+    const weeksAhead = parseWeeksAhead(req.body.weeksAhead)
     if (schedule.days.length > 0) {
-      sessionsCreated = await generateSessionsForBatch(batch)
+      sessionsCreated = await generateSessionsForBatch(batch, weeksAhead, classTopic)
     }
+    const extras = await createExtraClasses(batch, parseExtraClasses(req.body.extraClasses))
 
-    res.status(201).json({ batch: publicBatch(batch), sessionsCreated: sessionsCreated.length })
+    res.status(201).json({
+      batch: publicBatch(batch),
+      sessionsCreated: sessionsCreated.length + extras.length,
+    })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -233,10 +276,14 @@ router.patch('/:batchId', requireRole('tutor'), async (req, res) => {
     await batch.save()
 
     let sessionsCreated = 0
+    const weeksAhead = parseWeeksAhead(req.body.weeksAhead)
+    const classTopic = parseClassTopic(req.body.classTopic, `${batch.name} — Class`)
     if (req.body.regenerateSessions === true) {
-      const sessions = await regenerateFutureSessions(batch)
+      const sessions = await regenerateFutureSessions(batch, weeksAhead, classTopic)
       sessionsCreated = sessions.length
     }
+    const extras = await createExtraClasses(batch, parseExtraClasses(req.body.extraClasses))
+    sessionsCreated += extras.length
 
     res.json({ batch: publicBatch(batch), sessionsCreated })
   } catch (error) {

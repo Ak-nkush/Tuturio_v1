@@ -18,32 +18,19 @@ function publicResource(resource) {
   }
 }
 
-function batchRecipients(batch) {
-  const students = []
-  const parents = []
-  for (const row of batch.enrollment ?? []) {
-    if (row.status !== 'active') continue
-    students.push(row.studentId)
-    if (row.parentId) parents.push(row.parentId)
-  }
-  return { students, parents }
+function batchStudentIds(batch) {
+  return (batch.enrollment ?? [])
+    .filter((row) => row.status === 'active')
+    .map((row) => row.studentId)
 }
 
 async function notifyResourceShared(batch, title) {
-  const { students, parents } = batchRecipients(batch)
-  await notifyMany(students, {
+  await notifyMany(batchStudentIds(batch), {
     title: 'New material shared',
     message: `"${title}" was added to ${batch.name}`,
     type: 'batch',
     event: 'batch',
-    link: '/student/dashboard?tab=materials',
-  })
-  await notifyMany(parents, {
-    title: 'New material shared',
-    message: `"${title}" was added to ${batch.name}`,
-    type: 'batch',
-    event: 'batch',
-    link: '/parent/dashboard?tab=materials',
+    link: '/student/dashboard/materials',
   })
 }
 

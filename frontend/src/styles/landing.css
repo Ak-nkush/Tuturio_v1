@@ -34,15 +34,7 @@
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-family: 'Caveat', cursive;
-  font-weight: 700;
-  font-size: 1.7rem;
   text-decoration: none;
-}
-
-.logo svg {
-  flex-shrink: 0;
 }
 
 .roletabs {

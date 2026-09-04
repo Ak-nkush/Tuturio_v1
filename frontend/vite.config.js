@@ -4,6 +4,11 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: './tests/setup.js',
+    include: ['tests/component/**/*.test.{js,jsx}'],
+  },
   server: {
     proxy: {
       '/api': {

@@ -21,7 +21,7 @@ function defaultPrefs() {
 
 router.get('/', async (req, res) => {
   try {
-    const notifications = await Notification.find({ userId: req.user.userId })
+    const notifications = await Notification.find({ userId: req.user.userId, isRead: false })
       .sort({ createdAt: -1 })
       .limit(50)
     res.json({ notifications })
@@ -62,11 +62,8 @@ router.patch('/preferences', async (req, res) => {
 
 router.patch('/read-all', async (req, res) => {
   try {
-    await Notification.updateMany(
-      { userId: req.user.userId, isRead: false },
-      { $set: { isRead: true } },
-    )
-    res.json({ message: 'All notifications marked as read' })
+    await Notification.deleteMany({ userId: req.user.userId, isRead: false })
+    res.json({ message: 'All notifications cleared' })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -80,10 +77,8 @@ router.patch('/:id/read', async (req, res) => {
       return res.status(404).json({ error: 'Notification not found' })
     }
 
-    notification.isRead = true
-    await notification.save()
-
-    res.json({ notification })
+    await notification.deleteOne()
+    res.json({ message: 'Notification dismissed' })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })

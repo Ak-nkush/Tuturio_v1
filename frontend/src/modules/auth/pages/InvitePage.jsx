@@ -23,6 +23,7 @@ export function InvitePage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -52,6 +53,14 @@ export function InvitePage() {
     e.preventDefault()
     setError('')
     if (!asExistingUser) {
+      if (name.trim().length < 2) {
+        setError('Choose a username of at least 2 characters')
+        return
+      }
+      if (password !== confirmPassword) {
+        setError('Passwords do not match')
+        return
+      }
       const passwordError = validatePassword(password)
       if (passwordError) {
         setError(passwordError)
@@ -61,9 +70,13 @@ export function InvitePage() {
     setSubmitting(true)
 
     try {
+      const lockedEmail = inviteState.invite?.email
+      const username = name.trim()
       const body = asExistingUser
-        ? { name: user.name, email: user.email, password: '' }
-        : { name: name.trim(), email: email.trim(), password }
+        ? {}
+        : lockedEmail
+          ? { name: username, password }
+          : { name: username, email: email.trim(), password }
 
       if (asExistingUser && user) {
         const res = await inviteApi.redeem(code, {})
@@ -153,24 +166,52 @@ export function InvitePage() {
     )
   }
 
+  const lockedEmail = invite.email
+
   return (
     <AuthLayout
       title={`Join ${invite.batchName ?? 'your batch'}`}
-      subtitle="Create your account to get started. No phone numbers shared."
+      subtitle={
+        lockedEmail
+          ? 'Choose a username and password. Your email is already set.'
+          : 'Create your account to get started. No phone numbers shared.'
+      }
     >
       <span className={`role-badge ${invite.role}`}>Joining as {roleLabel}</span>
       {error && <div className="auth-error">{error}</div>}
 
       <form onSubmit={(e) => handleRedeem(e, false)}>
         <div className="auth-field">
-          <label htmlFor="name">Full name</label>
-          <input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <label htmlFor="username">Username</label>
+          <input
+            id="username"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoComplete="username"
+            minLength={2}
+            maxLength={80}
+            required
+          />
         </div>
-        <div className="auth-field">
-          <label htmlFor="email">Email</label>
-          <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </div>
+        {lockedEmail ? (
+          <div className="auth-field">
+            <label>Email</label>
+            <p className="auth-locked-value">{lockedEmail}</p>
+          </div>
+        ) : (
+          <div className="auth-field">
+            <label htmlFor="email">Email</label>
+            <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </div>
+        )}
         <PasswordField value={password} onChange={setPassword} />
+        <PasswordField
+          id="confirm-password"
+          label="Confirm password"
+          value={confirmPassword}
+          onChange={setConfirmPassword}
+          showStrength={false}
+        />
         <button type="submit" className="auth-btn" disabled={submitting}>
           {submitting ? 'Creating account…' : 'Create account & join'}
         </button>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { GrainOverlay } from '../layout/GrainOverlay'
+import { BrandLogo } from '../brand/BrandLogo'
 import '../../styles/auth.css'
 
 const loginScenes = [
@@ -20,15 +20,6 @@ const loginScenes = [
     subtitle: 'Track attendance, notes, and progress without noisy group chats.',
   },
 ]
-
-function LogoIcon() {
-  return (
-    <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="2" y="4" width="26" height="18" rx="2" stroke="var(--chalk)" strokeWidth="1.6" />
-      <path d="M6 9 h10 M6 13 h14 M6 17 h8" stroke="var(--chalk)" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  )
-}
 
 function TutorScene() {
   return (
@@ -110,16 +101,7 @@ function LoginIllustration({ scene }) {
 }
 
 function LoginBrand() {
-  return (
-    <div className="login-brand" aria-label="Tuturio">
-      <svg width="38" height="28" viewBox="0 0 38 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M19 2 3 8l16 6 16-6-16-6Z" fill="#F4F1E6" stroke="#F4F1E6" strokeWidth="1.5" />
-        <path d="M9 11v7c5 5 15 5 20 0v-7" stroke="#F4F1E6" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M34 9v9" stroke="#F4F1E6" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
-      <span>TUTURIO</span>
-    </div>
-  )
+  return <BrandLogo className="login-brand" size="lg" />
 }
 
 export function AuthLayout({ title, subtitle, children, variant = 'default' }) {
@@ -170,10 +152,7 @@ export function AuthLayout({ title, subtitle, children, variant = 'default' }) {
       <GrainOverlay />
       <nav className="landing-nav">
         <div className="nav-inner">
-          <Link to="/" className="logo">
-            <LogoIcon />
-            Tuturio
-          </Link>
+          <BrandLogo to="/" className="logo" size="md" />
         </div>
       </nav>
       <main className="auth-main">

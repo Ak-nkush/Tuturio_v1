@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { authApi, dashboardPath } from '../lib/api'
+import { authApi, dashboardPath, postLoginPath } from '../lib/api'
 
 const AuthContext = createContext(null)
 
@@ -56,4 +56,4 @@ export function useAuth() {
   return ctx
 }
 
-export { dashboardPath }
+export { dashboardPath, postLoginPath }

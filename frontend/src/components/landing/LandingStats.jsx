@@ -9,7 +9,7 @@ const stats = [
   },
   {
     value: '1 view',
-    label: 'for parents to see attendance, notes and progress for every child',
+    label: 'for parents to see attendance, scores and progress for every child',
   },
 ]
 

@@ -1,5 +1,6 @@
 import { verifyAccessToken } from '../utils/tokens.js'
 import { User } from '../models/User.js'
+import { Message } from '../models/Message.js'
 import { areRelated } from './relationshipService.js'
 
 const activeUsers = new Map()
@@ -61,6 +62,7 @@ export function initSocket(io) {
       activeUsers.set(userId, new Set())
     }
     activeUsers.get(userId).add(socket.id)
+    markInboxDelivered(userId).catch(() => {})
 
     socket.on('conversation:join', async (peerId, ack) => {
       const allowed = await areRelated(userId, String(peerId ?? ''))
@@ -82,6 +84,25 @@ export function initSocket(io) {
       }
     })
   })
+}
+
+export function isUserOnline(userId) {
+  const sockets = activeUsers.get(userId)
+  return Boolean(sockets && sockets.size > 0)
+}
+
+async function markInboxDelivered(userId) {
+  const pending = await Message.find({ receiverId: userId, isDelivered: false }).select('senderId')
+  if (pending.length === 0) return
+
+  const senders = [...new Set(pending.map((row) => row.senderId))]
+  await Message.updateMany(
+    { receiverId: userId, isDelivered: false },
+    { $set: { isDelivered: true, deliveredAt: new Date() } },
+  )
+  for (const senderId of senders) {
+    emitToUser(senderId, 'messages:delivered', { recipientId: userId })
+  }
 }
 
 export function emitToUser(userId, event, data) {

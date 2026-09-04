@@ -7,6 +7,7 @@ export function PasswordField({
   label = 'Password',
   showStrength = true,
   minLength,
+  autoComplete = 'new-password',
 }) {
   const error = value ? validatePassword(value) : null
   const valid = value.length >= PASSWORD_MIN_LENGTH
@@ -19,7 +20,7 @@ export function PasswordField({
         type="password"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        autoComplete={id === 'password' ? 'new-password' : 'current-password'}
+        autoComplete={autoComplete}
         minLength={minLength ?? PASSWORD_MIN_LENGTH}
         required
       />

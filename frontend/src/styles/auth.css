@@ -72,6 +72,15 @@
   border-color: var(--teacher);
 }
 
+.auth-locked-value {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+  background: var(--bg-alt2);
+  color: var(--chalk-dim);
+}
+
 .auth-field input[type="checkbox"] {
   width: 1.15rem;
   height: 1.15rem;
@@ -287,18 +296,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   margin-bottom: 54px;
-  color: var(--chalk);
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 2rem;
-  line-height: 1;
-  letter-spacing: -0.08em;
-}
-
-.login-brand svg {
-  margin-right: -11px;
-  transform: translateY(-13px);
 }
 
 .login-form .auth-field {

@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { ProtectedRoute } from '../components/auth/ProtectedRoute'
 import { AuthProvider } from '../context/AuthContext'
 import { SocketProvider } from '../context/SocketContext'
@@ -10,6 +10,7 @@ import { RegisterPage } from '../modules/auth/pages/RegisterPage'
 import { AccountSettingsPage, AccountSettingsRedirect } from '../modules/auth/pages/AccountSettingsPage'
 import { BatchDetailsPage } from '../modules/dashboard/pages/BatchDetailsPage'
 import { SessionWorkspacePage } from '../modules/dashboard/pages/SessionWorkspacePage'
+import { ClassCalendarPage } from '../modules/dashboard/pages/ClassCalendarPage'
 import { TutorChatPage } from '../modules/dashboard/pages/TutorChatPage'
 import { TutorNotificationsPage } from '../modules/dashboard/pages/TutorNotificationsPage'
 import { TutorSubjectsPage } from '../modules/dashboard/pages/TutorSubjectsPage'
@@ -22,6 +23,7 @@ import {
   TutorOverviewPage,
   TutorStudentsPage,
 } from '../modules/dashboard/pages/DashboardAppPages'
+import { LearnerDashboardLayout } from '../modules/dashboard/components/LearnerDashboardLayout'
 import { LandingPage } from '../pages/LandingPage'
 
 export function AppRoutes() {
@@ -45,6 +47,14 @@ export function AppRoutes() {
             }
           />
           <Route
+            path="/tutor"
+            element={
+              <ProtectedRoute allowedRoles={['tutor']}>
+                <Navigate to="/tutor/dashboard" replace />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/tutor/dashboard"
             element={
               <ProtectedRoute allowedRoles={['tutor']}>
@@ -52,6 +62,7 @@ export function AppRoutes() {
               </ProtectedRoute>
             }>
             <Route index element={<TutorOverviewPage />} />
+            <Route path="calendar" element={<ClassCalendarPage />} />
             <Route path="batches" element={<TutorBatchesPage />} />
             <Route path="batches/:batchId" element={<BatchDetailsPage />} />
             <Route path="subjects" element={<TutorSubjectsPage />} />
@@ -63,10 +74,35 @@ export function AppRoutes() {
             <Route path="sessions/:sessionId" element={<SessionWorkspacePage />} />
           </Route>
           <Route
+            path="/student"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <Navigate to="/student/dashboard" replace />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/student/dashboard"
             element={
               <ProtectedRoute allowedRoles={['student']}>
-                <StudentDashboardPage />
+                <LearnerDashboardLayout role="student" />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<StudentDashboardPage />} />
+            <Route path="calendar" element={<ClassCalendarPage />} />
+            <Route path="attendance" element={<StudentDashboardPage />} />
+            <Route path="assignments" element={<StudentDashboardPage />} />
+            <Route path="materials" element={<StudentDashboardPage />} />
+            <Route path="chat" element={<StudentDashboardPage />} />
+            <Route path="notifications" element={<StudentDashboardPage />} />
+            <Route path="settings" element={<AccountSettingsPage />} />
+          </Route>
+          <Route
+            path="/parent"
+            element={
+              <ProtectedRoute allowedRoles={['parent']}>
+                <Navigate to="/parent/dashboard" replace />
               </ProtectedRoute>
             }
           />
@@ -74,10 +110,20 @@ export function AppRoutes() {
             path="/parent/dashboard"
             element={
               <ProtectedRoute allowedRoles={['parent']}>
-                <ParentDashboardPage />
+                <LearnerDashboardLayout role="parent" />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<ParentDashboardPage />} />
+            <Route path="calendar" element={<ClassCalendarPage />} />
+            <Route path="attendance" element={<ParentDashboardPage />} />
+            <Route path="assignments" element={<ParentDashboardPage />} />
+            <Route path="materials" element={<Navigate to="/parent/dashboard" replace />} />
+            <Route path="chat" element={<ParentDashboardPage />} />
+            <Route path="notifications" element={<ParentDashboardPage />} />
+            <Route path="settings" element={<AccountSettingsPage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </SocketProvider>
       </AuthProvider>

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../../../components/auth/AuthLayout'
 import { PasswordField } from '../../../components/auth/PasswordField'
-import { useAuth, dashboardPath } from '../../../context/AuthContext'
+import { useAuth, postLoginPath } from '../../../context/AuthContext'
 
 export function LoginPage() {
   const { user, login } = useAuth()
@@ -16,7 +16,7 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
 
   if (user) {
-    return <Navigate to={from ?? dashboardPath(user.role)} replace />
+    return <Navigate to={postLoginPath(user.role, from)} replace />
   }
 
   async function handleSubmit(e) {
@@ -25,7 +25,7 @@ export function LoginPage() {
     setSubmitting(true)
     try {
       const loggedIn = await login(email.trim(), password)
-      navigate(from ?? dashboardPath(loggedIn.role), { replace: true })
+      navigate(postLoginPath(loggedIn.role, from), { replace: true })
     } catch (err) {
       if (err?.reason === 'account_archived') {
         setError('Your access has been paused by your tutor.')
@@ -63,6 +63,7 @@ export function LoginPage() {
           value={password}
           onChange={setPassword}
           showStrength={false}
+          autoComplete="current-password"
         />
 
         <div className="login-forgot">
@@ -76,8 +77,6 @@ export function LoginPage() {
 
       <div className="auth-links login-create">
         Are you new? <span>Ask your tutor for an invite</span>
-        <br />
-        New tutor? <Link to="/auth/register">Create your tutor account</Link>
         <br />
         <Link to="/">Back to home</Link>
       </div>

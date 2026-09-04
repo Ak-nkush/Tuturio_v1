@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { notificationApi } from '../../../lib/api'
+import { notificationApi, formatDateTime } from '../../../lib/api'
 import '../../../styles/dashboard.css'
 
 const PREF_LABELS = {
@@ -26,14 +26,14 @@ export function TutorNotificationsPage({ embedded = false }) {
     load().catch((err) => setError(err.message))
   }, [])
 
-  async function markAll() {
-    await notificationApi.readAll()
-    await load()
+  async function openNotification(note) {
+    await notificationApi.read(note._id)
+    setItems((current) => current.filter((item) => item._id !== note._id))
   }
 
-  async function markOne(id) {
-    await notificationApi.read(id)
-    await load()
+  async function markAll() {
+    await notificationApi.readAll()
+    setItems([])
   }
 
   async function togglePref(key) {
@@ -52,14 +52,19 @@ export function TutorNotificationsPage({ embedded = false }) {
             <p>View events and choose what you want to receive.</p>
           </div>
           <button type="button" className="btn-outline" onClick={markAll}>
-            Mark all read
+            Clear all
           </button>
         </div>
       )}
       {embedded && (
-        <div className="button-row mb-6">
+        <div className="dashboard-header section-heading">
+          <div>
+            <span className="eyebrow">Alerts</span>
+            <h1>Notifications</h1>
+            <p>View events and choose what you want to receive.</p>
+          </div>
           <button type="button" className="btn-outline" onClick={markAll}>
-            Mark all read
+            Clear all
           </button>
         </div>
       )}
@@ -82,26 +87,30 @@ export function TutorNotificationsPage({ embedded = false }) {
       <section className="premium-card">
         <h2>Inbox</h2>
         {items.length === 0 ? (
-          <p className="text-muted mt-4">No notifications yet.</p>
+          <p className="text-muted mt-4">No new notifications.</p>
         ) : (
           <ul className="notification-feed mt-4">
             {items.map((n) => (
-              <li key={n._id} className={n.isRead ? 'read' : 'unread'}>
+              <li key={n._id} className="unread">
                 <div>
                   <strong>{n.title}</strong>
                   <p>{n.message}</p>
-                  <small className="text-muted">{new Date(n.createdAt).toLocaleString()}</small>
-                  {n.link && (
-                    <p>
-                      <Link to={n.link}>Open</Link>
-                    </p>
-                  )}
+                  <small className="text-muted">{formatDateTime(n.createdAt)}</small>
                 </div>
-                {!n.isRead && (
-                  <button type="button" className="btn-outline btn-sm" onClick={() => markOne(n._id)}>
-                    Mark read
+                <div className="table-actions">
+                  {n.link && (
+                    <Link
+                      className="btn-outline btn-sm"
+                      to={n.link}
+                      onClick={() => openNotification(n)}
+                    >
+                      Open
+                    </Link>
+                  )}
+                  <button type="button" className="btn-outline btn-sm" onClick={() => openNotification(n)}>
+                    Dismiss
                   </button>
-                )}
+                </div>
               </li>
             ))}
           </ul>

@@ -63,22 +63,40 @@ router.get('/student/me', async (req, res) => {
     const batchIds = batches.map((b) => b.batchId)
 
     const assignments = await Assignment.find({ batchId: { $in: batchIds } }).sort({ dueDate: 1 })
-    res.json({ assignments })
+    const submissions = await Submission.find({
+      studentId: req.user.userId,
+      assignmentId: { $in: assignments.map((item) => item._id) },
+    })
+    const byAssignment = Object.fromEntries(
+      submissions.map((item) => [String(item.assignmentId), publicSubmission(item)]),
+    )
+    res.json({
+      assignments: assignments.map((item) => ({
+        ...(item.toObject ? item.toObject() : item),
+        submission: byAssignment[String(item._id)] ?? null,
+      })),
+    })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
   }
 })
 
-// Fetch assignments for parent's linked students
-router.get('/parent/students', async (req, res) => {
+// Fetch assignments for parent's linked students, with that child's status and grade
+router.get('/parent/students', requireRole('parent'), async (req, res) => {
   try {
     const parent = await User.findOne({ userId: req.user.userId })
     if (!parent) return res.status(404).json({ error: 'User not found' })
 
+    const requestedStudentId = req.query.studentId ? String(req.query.studentId) : ''
+    if (requestedStudentId && !parent.linkedStudentIds.includes(requestedStudentId)) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+    const studentIds = requestedStudentId ? [requestedStudentId] : parent.linkedStudentIds
+
     const batches = await Batch.find({
       'enrollment': {
-        $elemMatch: { studentId: { $in: parent.linkedStudentIds }, status: 'active' },
+        $elemMatch: { studentId: { $in: studentIds }, status: 'active' },
       },
       status: 'active',
     })
@@ -88,7 +106,28 @@ router.get('/parent/students', async (req, res) => {
     if (req.query.batchId) filter.batchId = req.query.batchId
 
     const assignments = await Assignment.find(filter).sort({ dueDate: 1 })
-    res.json({ assignments })
+    const submissions = await Submission.find({
+      studentId: { $in: studentIds },
+      assignmentId: { $in: assignments.map((item) => item._id) },
+    })
+    const byKey = Object.fromEntries(
+      submissions.map((item) => [`${item.assignmentId}:${item.studentId}`, publicSubmission(item)]),
+    )
+
+    res.json({
+      assignments: assignments.map((item) => {
+        const value = item.toObject ? item.toObject() : item
+        if (requestedStudentId) {
+          return { ...value, submission: byKey[`${item._id}:${requestedStudentId}`] ?? null }
+        }
+        return {
+          ...value,
+          submissions: studentIds
+            .map((studentId) => byKey[`${item._id}:${studentId}`] ?? null)
+            .filter(Boolean),
+        }
+      }),
+    })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -113,7 +152,7 @@ router.get('/:assignmentId/submission/me', validObjectIdParam('assignmentId'), a
 })
 
 // Fetch a student's submission for a parent
-router.get('/:assignmentId/submission/student/:studentId', validObjectIdParam('assignmentId'), async (req, res) => {
+router.get('/:assignmentId/submission/student/:studentId', requireRole('parent'), validObjectIdParam('assignmentId'), async (req, res) => {
   try {
     const parent = await User.findOne({ userId: req.user.userId })
     if (!parent || !parent.linkedStudentIds.includes(req.params.studentId)) {
@@ -199,14 +238,14 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       message: `"${trimmedTitle}" was posted in ${batch.name}`,
       type: 'batch',
       event: 'batch',
-      link: '/student/dashboard?tab=work',
+      link: '/student/dashboard/assignments',
     })
     await notifyMany(parentIds, {
       title: 'New assignment',
       message: `"${trimmedTitle}" was posted in ${batch.name}`,
       type: 'batch',
       event: 'batch',
-      link: '/parent/dashboard?tab=work',
+      link: '/parent/dashboard/assignments',
     })
 
     res.status(201).json({ assignment })
@@ -231,6 +270,11 @@ router.post('/:assignmentId/submit', validObjectIdParam('assignmentId'), upload.
     const batch = await Batch.findOne({ batchId: assignment.batchId, status: 'active' })
     const enrolled = batch?.enrollment.some((e) => e.studentId === req.user.userId && e.status === 'active')
     if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this batch' })
+
+    const existing = await Submission.findOne({ assignmentId: assignment._id, studentId: req.user.userId })
+    if (existing?.status === 'graded') {
+      return res.status(400).json({ error: 'This assignment is already graded' })
+    }
 
     const stored = await storeFile({
       buffer: req.file.buffer,
@@ -292,7 +336,7 @@ router.patch('/submission/:submissionId/grade', requireRole('tutor'), validObjec
       message: `"${assignment.title}" was graded: ${parsedScore}/${assignment.maxScore}`,
       type: 'student',
       event: 'progress',
-      link: '/student/dashboard?tab=work',
+      link: '/student/dashboard/assignments',
     })
 
     res.json({ submission: publicSubmission(submission) })

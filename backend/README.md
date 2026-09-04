@@ -25,12 +25,15 @@ then delivers the link to the recipient's address.
 
 ## Seed tutor
 
-Creates one tutor account and a sample batch (single-tutor deployment model).
+Creates one tutor account. No sample batches, students, or invites.
+
+Clear classroom data (keeps the tutor login): `npm run reset:data`
 
 Default credentials (override in `.env`):
 
+- Name: Meera Joshi
 - Email: `tutor@tuturio.local`
-- Password: `ChangeMeNow123456!` (min 16 chars)
+- Password: `MeeraJoshi8`
 
 ## Module 1 endpoints
 

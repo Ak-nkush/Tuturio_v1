@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useEffect } from 'react'
 import { GrainOverlay } from '../../../components/layout/GrainOverlay'
+import { BrandLogo } from '../../../components/brand/BrandLogo'
 import { useAuth } from '../../../context/AuthContext'
 import '../../../styles/dashboard.css'
 import '../../../styles/auth.css'
@@ -18,7 +19,7 @@ export function TutorDashboardLayout() {
       
       <aside className="dashboard-sidebar">
         <div className="sidebar-header">
-          <h2>Tuturio</h2>
+          <BrandLogo to="/tutor/dashboard" size="md" />
           <div className="user-profile">
             <span className="user-avatar">
               {user?.profilePictureUrl ? (
@@ -41,56 +42,49 @@ export function TutorDashboardLayout() {
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="nav-icon">✧</span>
-            Overview
+            <span className="nav-label">Overview</span>
+          </NavLink>
+          <NavLink 
+            to="/tutor/dashboard/calendar" 
+            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          >
+            <span className="nav-icon">▦</span>
+            <span className="nav-label">Calendar</span>
           </NavLink>
           <NavLink 
             to="/tutor/dashboard/batches" 
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="nav-icon">⚄</span>
-            Batches
-          </NavLink>
-          <NavLink 
-            to="/tutor/dashboard/subjects" 
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <span className="nav-icon">▤</span>
-            Subjects
+            <span className="nav-label">Batches</span>
           </NavLink>
           <NavLink 
             to="/tutor/dashboard/students" 
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="nav-icon">☺</span>
-            Students
+            <span className="nav-label">Students</span>
           </NavLink>
           <NavLink 
             to="/tutor/dashboard/chat" 
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="nav-icon">✉</span>
-            Chat
+            <span className="nav-label">Chat</span>
           </NavLink>
           <NavLink 
             to="/tutor/dashboard/notifications" 
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="nav-icon">●</span>
-            Notifications
-          </NavLink>
-          <NavLink 
-            to="/tutor/dashboard/analytics" 
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <span className="nav-icon">◈</span>
-            Analytics
+            <span className="nav-label">Notifications</span>
           </NavLink>
           <NavLink
             to="/tutor/dashboard/settings"
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="nav-icon">⚙</span>
-            Settings
+            <span className="nav-label">Settings</span>
           </NavLink>
         </nav>
 
