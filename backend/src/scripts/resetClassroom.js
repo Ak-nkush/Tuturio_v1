@@ -41,8 +41,6 @@ async function resetClassroom() {
   const tutor = await User.findOne({ role: 'tutor' })
   if (tutor) {
     tutor.bio = ''
-    tutor.phone = ''
-    tutor.profilePicture = null
     tutor.linkedStudentIds = []
     tutor.linkedParentIds = []
     tutor.name = env.tutorName

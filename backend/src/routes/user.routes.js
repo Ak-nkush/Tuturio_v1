@@ -2,10 +2,6 @@ import { Router } from 'express'
 import { User, publicUser } from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
 import { escapeRegex } from '../utils/validate.js'
-import { createUpload, SAFE_PROFILE_IMAGE_TYPES } from '../middleware/uploads.js'
-import { deleteStoredFile, storeFile } from '../services/storageService.js'
-
-const upload = createUpload({ allowedTypes: SAFE_PROFILE_IMAGE_TYPES, maxFileSize: 5 * 1024 * 1024 })
 
 const router = Router()
 
@@ -15,7 +11,6 @@ router.put('/profile', async (req, res) => {
   try {
     const name = req.body.name !== undefined ? String(req.body.name).trim() : undefined
     const bio = req.body.bio !== undefined ? String(req.body.bio).trim() : undefined
-    const phone = req.body.phone !== undefined ? String(req.body.phone).trim() : undefined
 
     if (name !== undefined && (!name || name.length > 80)) {
       return res.status(400).json({ error: 'Name is required (max 80 characters)' })
@@ -23,16 +18,12 @@ router.put('/profile', async (req, res) => {
     if (bio !== undefined && bio.length > 500) {
       return res.status(400).json({ error: 'Bio too long (max 500 characters)' })
     }
-    if (phone !== undefined && !/^[0-9+\-\s()]{0,20}$/.test(phone)) {
-      return res.status(400).json({ error: 'Phone contains invalid characters' })
-    }
 
     const user = await User.findOne({ userId: req.user.userId })
     if (!user) return res.status(404).json({ error: 'User not found' })
 
     if (name !== undefined) user.name = name
     if (bio !== undefined) user.bio = bio
-    if (phone !== undefined) user.phone = phone
 
     await user.save()
 
@@ -40,33 +31,6 @@ router.put('/profile', async (req, res) => {
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
-  }
-})
-
-router.post('/profile-picture', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'File is required' })
-    }
-
-    const user = await User.findOne({ userId: req.user.userId })
-    if (!user) return res.status(404).json({ error: 'User not found' })
-
-    const previous = user.profilePicture
-    const stored = await storeFile({
-      buffer: req.file.buffer,
-      originalName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      folder: `profiles/${user.userId}`,
-    })
-    user.profilePicture = stored.storageKey
-    await user.save()
-    await deleteStoredFile(previous)
-
-    res.json({ user: publicUser(user) })
-  } catch (error) {
-    console.error(error)
-    res.status(500).json({ error: error.message ?? 'Server error' })
   }
 })
 

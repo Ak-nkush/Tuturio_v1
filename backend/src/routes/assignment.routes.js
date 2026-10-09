@@ -43,6 +43,22 @@ router.get('/batch/:batchId', async (req, res) => {
     }
 
     const assignments = await Assignment.find({ batchId: req.params.batchId }).sort({ createdAt: -1 })
+    if (req.user.role === 'tutor') {
+      const assignmentIds = assignments.map((a) => a._id)
+      const submissions = await Submission.find({ assignmentId: { $in: assignmentIds } })
+      const subsByAssignment = {}
+      for (const sub of submissions) {
+        const aId = String(sub.assignmentId)
+        if (!subsByAssignment[aId]) subsByAssignment[aId] = []
+        subsByAssignment[aId].push(publicSubmission(sub))
+      }
+      return res.json({
+        assignments: assignments.map((item) => ({
+          ...(item.toObject ? item.toObject() : item),
+          submissions: subsByAssignment[String(item._id)] ?? [],
+        })),
+      })
+    }
     res.json({ assignments })
   } catch (error) {
     console.error(error)
@@ -223,7 +239,6 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       description: description ? String(description).slice(0, 2000) : '',
       dueDate: parsedDue,
       maxScore: parsedMaxScore,
-      attachments: Array.isArray(req.body.attachments) ? req.body.attachments : [],
     })
 
     const studentIds = []

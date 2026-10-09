@@ -3,7 +3,7 @@ import { Announcement } from '../models/Announcement.js'
 import { Batch } from '../models/Batch.js'
 import { User } from '../models/User.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
-import { notifyMany } from '../services/notificationService.js'
+import { notifyMany, parentIdsForStudents } from '../services/notificationService.js'
 
 const router = Router()
 
@@ -57,7 +57,6 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       tutorId: req.user.userId,
       batchId,
       text,
-      attachments: req.body.attachments ?? [],
     })
 
     const studentIds = []
@@ -71,6 +70,13 @@ router.post('/', requireRole('tutor'), async (req, res) => {
       type: 'batch',
       event: 'announcements',
       link: '/student/dashboard/materials',
+    })
+    await notifyMany(await parentIdsForStudents(studentIds), {
+      title: 'New announcement',
+      message: `Notice posted in "${batch.name}"`,
+      type: 'batch',
+      event: 'announcements',
+      link: '/parent/dashboard/materials',
     })
 
     res.status(201).json({ announcement })

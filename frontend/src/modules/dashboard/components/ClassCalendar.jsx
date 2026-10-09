@@ -278,10 +278,20 @@ export function ClassCalendar({
         </div>
         <div className="cal-controls">
           {!lockedBatchId && batches.length > 1 && (
-            <select value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}>
-              <option value="">All batches</option>
+            <select
+              value={batchFilter}
+              onChange={(e) => setBatchFilter(e.target.value)}
+              aria-label="Filter by batch"
+            >
+              <option value="" style={{ background: '#1d3931', color: '#f4f1e6' }}>
+                All batches
+              </option>
               {batches.map((batch) => (
-                <option key={batch.batchId} value={batch.batchId}>
+                <option
+                  key={batch.batchId}
+                  value={batch.batchId}
+                  style={{ background: '#1d3931', color: '#f4f1e6' }}
+                >
                   {batch.name}
                 </option>
               ))}

@@ -8,8 +8,10 @@ export const SAFE_DOCUMENT_TYPES = new Set([
   'image/gif',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'text/plain',
 ])
+
 
 export const SAFE_PROFILE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 

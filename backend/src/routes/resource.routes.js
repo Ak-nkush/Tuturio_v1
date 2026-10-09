@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js'
 import { createUpload, SAFE_DOCUMENT_TYPES } from '../middleware/uploads.js'
 import { storeFile, deleteStoredFile, scanFile } from '../services/storageService.js'
 import { canAccessBatch } from '../services/accessService.js'
-import { notifyMany } from '../services/notificationService.js'
+import { notifyMany, parentIdsForStudents } from '../services/notificationService.js'
 import { uploadRateLimiter } from '../middleware/rateLimit.js'
 
 const upload = createUpload({ allowedTypes: SAFE_DOCUMENT_TYPES, maxFileSize: 10 * 1024 * 1024 })
@@ -25,12 +25,17 @@ function batchStudentIds(batch) {
 }
 
 async function notifyResourceShared(batch, title) {
-  await notifyMany(batchStudentIds(batch), {
+  const studentIds = batchStudentIds(batch)
+  const payload = {
     title: 'New material shared',
     message: `"${title}" was added to ${batch.name}`,
     type: 'batch',
     event: 'batch',
-    link: '/student/dashboard/materials',
+  }
+  await notifyMany(studentIds, { ...payload, link: '/student/dashboard/materials' })
+  await notifyMany(await parentIdsForStudents(studentIds), {
+    ...payload,
+    link: '/parent/dashboard/materials',
   })
 }
 

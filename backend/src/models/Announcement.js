@@ -5,7 +5,6 @@ const announcementSchema = new Schema(
     tutorId: { type: String, required: true },
     batchId: { type: String, required: true },
     text: { type: String, required: true, trim: true },
-    attachments: { type: [String], default: [] }, // Array of URLs
   },
   { timestamps: true }
 )

@@ -2,18 +2,20 @@ import rateLimit from 'express-rate-limit'
 
 export const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { message: 'Too many login attempts. Try again in 15 minutes.' },
   keyGenerator: (req) => `${req.ip}:${String(req.body?.email ?? '').toLowerCase()}`,
 })
 
 export const forgotPasswordRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: process.env.NODE_ENV === 'production' ? 10 : 50,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { message: 'Too many reset requests. Try again later.' },
 })
 
@@ -22,6 +24,7 @@ export const messageRateLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { message: 'Too many messages sent. Try again shortly.' },
 })
 
@@ -30,5 +33,7 @@ export const uploadRateLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { message: 'Too many uploads. Try again shortly.' },
 })
+

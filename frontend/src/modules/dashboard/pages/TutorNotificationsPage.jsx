@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useSocket } from '../../../context/SocketContext'
 import { notificationApi, formatDateTime } from '../../../lib/api'
 import '../../../styles/dashboard.css'
 
@@ -12,6 +13,7 @@ const PREF_LABELS = {
 }
 
 export function TutorNotificationsPage({ embedded = false }) {
+  const socket = useSocket()
   const [items, setItems] = useState([])
   const [prefs, setPrefs] = useState(null)
   const [error, setError] = useState('')
@@ -25,6 +27,15 @@ export function TutorNotificationsPage({ embedded = false }) {
   useEffect(() => {
     load().catch((err) => setError(err.message))
   }, [])
+
+  useEffect(() => {
+    if (!socket) return
+    const onNew = () => load().catch(() => {})
+    socket.on('notification:new', onNew)
+    return () => {
+      socket.off('notification:new', onNew)
+    }
+  }, [socket])
 
   async function openNotification(note) {
     await notificationApi.read(note._id)
@@ -47,7 +58,7 @@ export function TutorNotificationsPage({ embedded = false }) {
       {!embedded && (
         <div className="dashboard-header section-heading">
           <div>
-            <span className="eyebrow">Alerts</span>
+            <span className="eyebrow">Inbox</span>
             <h1>Notifications</h1>
             <p>View events and choose what you want to receive.</p>
           </div>
@@ -59,7 +70,7 @@ export function TutorNotificationsPage({ embedded = false }) {
       {embedded && (
         <div className="dashboard-header section-heading">
           <div>
-            <span className="eyebrow">Alerts</span>
+            <span className="eyebrow">Inbox</span>
             <h1>Notifications</h1>
             <p>View events and choose what you want to receive.</p>
           </div>

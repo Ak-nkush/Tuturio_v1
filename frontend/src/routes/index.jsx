@@ -118,7 +118,7 @@ export function AppRoutes() {
             <Route path="calendar" element={<ClassCalendarPage />} />
             <Route path="attendance" element={<ParentDashboardPage />} />
             <Route path="assignments" element={<ParentDashboardPage />} />
-            <Route path="materials" element={<Navigate to="/parent/dashboard" replace />} />
+            <Route path="materials" element={<ParentDashboardPage />} />
             <Route path="chat" element={<ParentDashboardPage />} />
             <Route path="notifications" element={<ParentDashboardPage />} />
             <Route path="settings" element={<AccountSettingsPage />} />

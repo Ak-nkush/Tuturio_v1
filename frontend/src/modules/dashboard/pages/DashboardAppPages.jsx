@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import { useSocket } from '../../../context/SocketContext'
 import {
   analyticsApi,
   announcementApi,
@@ -62,7 +63,6 @@ export function TutorOverviewPage() {
   const [analytics, setAnalytics] = useState(null)
   const [unreadNotes, setUnreadNotes] = useState(0)
   const [unreadChats, setUnreadChats] = useState(0)
-  const [createOpen, setCreateOpen] = useState(false)
   const [error, setError] = useState('')
   const todayLabel = new Date().toLocaleDateString([], {
     weekday: 'long',
@@ -103,6 +103,29 @@ export function TutorOverviewPage() {
     }
   }, [])
 
+  const socket = useSocket()
+  useEffect(() => {
+    if (!socket) return
+    const bump = () => {
+      notificationApi.list().then((res) => {
+        setUnreadNotes((res.notifications ?? []).filter((n) => !n.isRead).length)
+      }).catch(() => {})
+      messageApi.conversations().then((res) => {
+        setUnreadChats((res.conversations ?? []).reduce((sum, c) => sum + (c.unread ?? 0), 0))
+      }).catch(() => {})
+    }
+    socket.on('message:received', bump)
+    socket.on('message:sent', bump)
+    socket.on('messages:read', bump)
+    socket.on('notification:new', bump)
+    return () => {
+      socket.off('message:received', bump)
+      socket.off('message:sent', bump)
+      socket.off('messages:read', bump)
+      socket.off('notification:new', bump)
+    }
+  }, [socket])
+
   const firstName = user?.name?.split(' ')[0] ?? 'there'
   const attention = []
   if (sessions.length) {
@@ -140,9 +163,6 @@ export function TutorOverviewPage() {
           </h1>
           <p>Here&apos;s what&apos;s happening across your batches today.</p>
         </div>
-        <button type="button" className="btn-outline" onClick={() => setCreateOpen(true)}>
-          + Create batch
-        </button>
       </div>
       {error && <ErrorState message={error} />}
       <div className="stats-grid">
@@ -257,17 +277,6 @@ export function TutorOverviewPage() {
           </div>
         )}
       </section>
-      {createOpen && (
-        <BatchFormModal
-          batch={null}
-          onClose={() => setCreateOpen(false)}
-          onSave={async (payload) => {
-            await batchApi.create(payload)
-            const res = await batchApi.list()
-            setBatches(usableBatches(res.batches))
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -340,14 +349,14 @@ export function TutorBatchesPage() {
                   <strong>Schedule:</strong> {formatSchedule(batch.schedule)}
                 </p>
               </div>
-              <div className="button-row mt-4">
-                <Link className="btn-outline" to={`/tutor/dashboard/batches/${batch.batchId}`}>
+              <div className="batch-card-actions">
+                <Link className="btn-batch-action btn-batch-open" to={`/tutor/dashboard/batches/${batch.batchId}`}>
                   Open
                 </Link>
-                <button className="btn-outline" onClick={() => setModal(batch)}>
+                <button type="button" className="btn-batch-action btn-batch-edit" onClick={() => setModal(batch)}>
                   Edit
                 </button>
-                <button type="button" className="btn-danger-outline" onClick={() => archive(batch.batchId)}>
+                <button type="button" className="btn-batch-action btn-batch-archive" onClick={() => archive(batch.batchId)}>
                   Archive
                 </button>
               </div>
@@ -700,6 +709,10 @@ function attendanceLabel(status) {
   return status || 'Marked'
 }
 
+function classNameFor(batches, batchId) {
+  return batches.find((batch) => batch.batchId === batchId)?.name || 'Class'
+}
+
 function tabFromPath(pathname, role) {
   const base = role === 'parent' ? '/parent/dashboard' : '/student/dashboard'
   const rest = pathname.slice(base.length).replace(/^\//, '').split('/')[0]
@@ -783,15 +796,14 @@ function LearnerDashboard({ role }) {
       setAttendance(att)
       setProgress(prog)
 
-      if (role !== 'parent') {
-        const noticeLists = await Promise.all(nextBatches.map((batch) => announcementApi.getByBatch(batch.batchId)))
-        const resourceLists = await Promise.all(nextBatches.map((batch) => resourceApi.getByBatch(batch.batchId)))
-        setNotices(noticeLists.flatMap((res) => res.announcements ?? []))
-        setResources(resourceLists.flatMap((res) => res.resources ?? []))
-      } else {
-        setNotices([])
-        setResources([])
-      }
+      const noticeLists = await Promise.all(nextBatches.map((batch) => announcementApi.getByBatch(batch.batchId)))
+      const resourceLists = await Promise.all(nextBatches.map((batch) => resourceApi.getByBatch(batch.batchId)))
+      setNotices(
+        noticeLists
+          .flatMap((res) => res.announcements ?? [])
+          .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)),
+      )
+      setResources(resourceLists.flatMap((res) => res.resources ?? []))
     }
     load().catch((err) => setError(err.message))
   }, [role, childId])
@@ -811,9 +823,6 @@ function LearnerDashboard({ role }) {
   const visibleSessions = role === 'parent' && childId
     ? sessions.filter((session) => visibleBatchIds.has(session.batchId))
     : sessions
-  const visibleNotices = role === 'parent' && childId
-    ? notices.filter((item) => !item.batchId || visibleBatchIds.has(item.batchId))
-    : notices
   const visibleResources = role === 'parent' && childId
     ? filteredResources.filter((item) => !item.batchId || visibleBatchIds.has(item.batchId))
     : filteredResources
@@ -821,10 +830,17 @@ function LearnerDashboard({ role }) {
   const nextBatchName = visibleBatches.find((batch) => batch.batchId === nextSession?.batchId)?.name
   const latestRemark = progress.find((row) => row.remark)
 
+  const todayLabel = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).toUpperCase()
+
   const featureHeader = (() => {
     if (tab === 'work') {
       return {
-        eyebrow: 'Records',
+        eyebrow: 'ATTENDANCE & SCORES',
         title: role === 'parent' ? `${childFirst}'s attendance` : 'My attendance',
         copy: role === 'parent'
           ? `See how ${childFirst} was marked in class, plus scores the tutor recorded.`
@@ -833,35 +849,33 @@ function LearnerDashboard({ role }) {
     }
     if (tab === 'assignments') {
       return {
-        eyebrow: 'Homework',
+        eyebrow: 'HOMEWORK & SUBMISSIONS',
         title: role === 'parent' ? `${childFirst}'s assignments` : 'Assignments',
         copy: role === 'parent'
-          ? 'Status and grades only. Your child uploads work privately with the tutor.'
-          : 'Upload a file for each homework. You can replace it until the tutor grades it.',
+          ? 'Track assignments and view uploaded submissions.'
+          : 'Upload your work for each homework to submit to your tutor.',
       }
     }
     if (tab === 'materials') {
       return {
-        eyebrow: 'Class files',
-        title: 'My notes',
-        copy: 'Announcements and files your tutor shared with your batches.',
+        eyebrow: 'CLASS MATERIALS',
+        title: 'Class notes & files',
+        copy: role === 'parent'
+          ? `Files the tutor shared for ${childFirst}'s batches.`
+          : 'Files your tutor shared with your batches.',
       }
     }
     if (tab === 'alerts') {
       return null
     }
     return {
-      eyebrow: role === 'parent' ? 'For parents' : 'Student view',
-      title: role === 'parent'
-        ? waitingForChild
-          ? 'Your child has not joined yet'
-          : `Welcome back, ${firstName}`
-        : `Hi ${firstName}, here are your classes`,
+      eyebrow: todayLabel,
+      title: `${greetingFor(new Date())}, ${firstName}`,
       copy: role === 'parent'
         ? waitingForChild
-          ? 'Once they accept the tutor’s invite, you will see classes, attendance, and scores here.'
-          : `A simple look at how ${childFirst} is doing — classes, attendance, and scores.`
-        : 'Your timetable, scores, and notes. Chat is private with your tutor only.',
+          ? 'Once your child accepts the tutor’s invite, you will see their classes, attendance, and scores here.'
+          : `Here's what's happening across ${childFirst}'s batches today.`
+        : 'Here’s what’s happening across your classes and schedule today.',
     }
   })()
 
@@ -871,7 +885,7 @@ function LearnerDashboard({ role }) {
         {error && <ErrorState message={error} />}
         {role === 'parent' && children.length > 0 && (
           <div className="parent-child-picks">
-            <span>Looking at</span>
+            <span>Student:</span>
             {children.map((child) => (
               <button
                 key={child.userId}
@@ -898,6 +912,25 @@ function LearnerDashboard({ role }) {
             <h1>{featureHeader.title}</h1>
             <p>{featureHeader.copy}</p>
           </div>
+          {role === 'parent' && children.length > 0 && (
+            <div className="parent-hero-picks">
+              <span className="text-muted text-xs font-semibold" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>
+                Active student
+              </span>
+              <div className="parent-child-picks" style={{ margin: 0 }}>
+                {children.map((child) => (
+                  <button
+                    key={child.userId}
+                    type="button"
+                    className={child.userId === childId ? 'is-active' : ''}
+                    onClick={() => setChildId(child.userId)}
+                  >
+                    {child.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
       {error && <ErrorState message={error} />}
@@ -913,115 +946,121 @@ function LearnerDashboard({ role }) {
           )}
         </div>
       )}
-      {role === 'parent' && children.length > 0 && (
-        <div className="parent-child-picks">
-          <span>Looking at</span>
-          {children.map((child) => (
-            <button
-              key={child.userId}
-              type="button"
-              className={child.userId === childId ? 'is-active' : ''}
-              onClick={() => setChildId(child.userId)}
-            >
-              {child.name}
-            </button>
-          ))}
-        </div>
-      )}
       {tab === 'alerts' && <TutorNotificationsPage embedded />}
       {tab === 'home' && (
         <>
           <section className="premium-card mb-6">
-            <h2>{role === 'parent' ? `How ${childFirst} is doing` : 'Your snapshot'}</h2>
-            {role === 'parent' ? (
-              <div className="learner-stats">
-                <div className="learner-stat">
-                  <span>Attendance</span>
-                  <strong>{attendancePct != null ? `${attendancePct}%` : '—'}</strong>
-                  <small>{attendance.length ? `Across ${attendance.length} marked class${attendance.length === 1 ? '' : 'es'}` : 'No classes marked yet'}</small>
+            <h2>Your snapshot</h2>
+            <div className="learner-stats">
+              <div className="learner-stat">
+                <span>Attendance</span>
+                <strong className="stat-metric-large">{attendancePct != null ? `${attendancePct}%` : '—'}</strong>
+                <small>{attendance.length ? `Across ${attendance.length} marked class${attendance.length === 1 ? '' : 'es'}` : 'No classes marked yet'}</small>
+              </div>
+              <div className="learner-stat">
+                <span>Next class</span>
+                <strong className="stat-metric-title">{nextSession ? nextSession.topic : 'None yet'}</strong>
+                <small>
+                  {nextSession
+                    ? `${formatDateTime(nextSession.date)}${nextBatchName ? ` · ${nextBatchName}` : ''}`
+                    : 'When the tutor schedules a class, it will show here'}
+                </small>
+              </div>
+              <div className="learner-stat">
+                <span>Latest remark</span>
+                <strong className="stat-metric-title">{latestRemark ? latestRemark.topic || 'Note' : 'No scores yet'}</strong>
+                <small>
+                  {latestRemark
+                    ? `“${latestRemark.remark}”`
+                    : 'Scores and remarks from class will appear here'}
+                </small>
+              </div>
+            </div>
+            {scorePoints.length > 0 && (
+              <div className="learner-barchart-container">
+                <div className="learner-barchart-header">
+                  <h3 className="learner-barchart-title">
+                    <span>📊</span> Recent Assessment Scores
+                  </h3>
+                  <span className="learner-barchart-subtitle">
+                    Percentage obtained across recent tests & quizzes
+                  </span>
                 </div>
-                <div className="learner-stat">
-                  <span>Next class</span>
-                  <strong>{nextSession ? nextSession.topic : 'None yet'}</strong>
-                  <small>
-                    {nextSession
-                      ? `${formatDateTime(nextSession.date)}${nextBatchName ? ` · ${nextBatchName}` : ''}`
-                      : 'When the tutor schedules a class, it will show here'}
-                  </small>
-                </div>
-                <div className="learner-stat">
-                  <span>From the tutor</span>
-                  <strong>{latestRemark ? 'Latest note' : 'No notes yet'}</strong>
-                  <small>
-                    {latestRemark
-                      ? `“${latestRemark.remark}”${latestRemark.topic ? ` · ${latestRemark.topic}` : ''}`
-                      : 'Remarks from class will appear here'}
-                  </small>
+                <div className="learner-barchart-stage">
+                  {scorePoints.map((row, index) => {
+                    const pct = row.maxScore ? Math.round((row.score / row.maxScore) * 100) : 0
+                    const topicTitle = row.topic || `Test ${index + 1}`
+                    return (
+                      <div
+                        key={row._id || index}
+                        className="learner-bar-col"
+                        title={`${topicTitle}: ${row.score}/${row.maxScore} (${pct}%)`}
+                      >
+                        <span className="learner-bar-pct">{pct}%</span>
+                        <div className="learner-bar-track">
+                          <div
+                            className="learner-bar-fill"
+                            style={{ height: `${Math.max(pct, 6)}%` }}
+                          />
+                        </div>
+                        <span className="learner-bar-caption" title={topicTitle}>
+                          {topicTitle}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
-            ) : (
-              <div className="learner-stats">
-                <div className="learner-stat">
-                  <span>Attendance</span>
-                  <strong>{attendancePct != null ? `${attendancePct}%` : '—'}</strong>
-                  <small>{attendance.length ? `Across ${attendance.length} marked class${attendance.length === 1 ? '' : 'es'}` : 'No classes marked yet'}</small>
-                </div>
-                <div className="learner-stat">
-                  <span>Next class</span>
-                  <strong>{nextSession ? nextSession.topic : 'None yet'}</strong>
-                  <small>
-                    {nextSession
-                      ? `${formatDateTime(nextSession.date)}${nextBatchName ? ` · ${nextBatchName}` : ''}`
-                      : 'When the tutor schedules a class, it will show here'}
-                  </small>
-                </div>
-                <div className="learner-stat">
-                  <span>Latest remark</span>
-                  <strong>{latestRemark ? latestRemark.topic || 'Note' : 'No scores yet'}</strong>
-                  <small>
-                    {latestRemark
-                      ? `“${latestRemark.remark}”`
-                      : 'Scores and remarks from class will appear here'}
-                  </small>
-                </div>
-              </div>
-            )}
-            {role !== 'parent' && scorePoints.length > 1 && (
-              <svg viewBox="0 0 160 48" className="mt-4 learner-trend" role="img" aria-label="Score trend">
-                <polyline
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  points={scorePoints.map((row, index) => {
-                    const x = (index / (scorePoints.length - 1)) * 160
-                    const pct = row.maxScore ? row.score / row.maxScore : 0
-                    const y = 44 - pct * 40
-                    return `${x},${y}`
-                  }).join(' ')}
-                />
-              </svg>
             )}
           </section>
           <section className="premium-card mb-6">
-            <h2>{role === 'parent' ? `${childFirst}'s batches` : 'Your batches'}</h2>
+            <h2>Your batches</h2>
             {visibleBatches.length === 0 ? (
               <div className="empty-state">
                 {role === 'parent' ? `${childFirst} is not in an active batch yet.` : 'You are not in an active batch yet.'}
               </div>
             ) : (
-              <div className="batches-grid mt-4">
-                {visibleBatches.map((batch) => (
-                  <article className="batch-card parent-batch-card" key={batch.batchId}>
-                    <h3>{batch.name}</h3>
-                    <p><span>Subject</span>{(batch.subjects ?? []).join(', ') || 'Not set'}</p>
-                    <p><span>When</span>{formatSchedule(batch.schedule)}</p>
-                  </article>
-                ))}
+              <div className="batches-grid learner-batches mt-4">
+                {visibleBatches.map((batch) => {
+                  const latest = notices.find((item) => item.batchId === batch.batchId)
+                  return (
+                    <article className="class-batch-row" key={batch.batchId}>
+                      <div className="class-batch-info">
+                        <h3>{batch.name}</h3>
+                        <dl className="class-batch-meta">
+                          <div>
+                            <dt>Subject</dt>
+                            <dd>{(batch.subjects ?? []).join(', ') || 'Not set'}</dd>
+                          </div>
+                          <div>
+                            <dt>When</dt>
+                            <dd>{formatSchedule(batch.schedule)}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <aside className={`class-batch-notice${latest ? ' has-notice' : ''}`}>
+                        <p className="class-batch-notice-kicker">Announcement</p>
+                        {latest ? (
+                          <>
+                            <p className="class-batch-notice-text">{latest.text}</p>
+                            {latest.createdAt && (
+                              <time className="class-batch-notice-time" dateTime={latest.createdAt}>
+                                {formatDateTime(latest.createdAt)}
+                              </time>
+                            )}
+                          </>
+                        ) : (
+                          <p className="class-batch-notice-empty">Nothing posted yet</p>
+                        )}
+                      </aside>
+                    </article>
+                  )
+                })}
               </div>
             )}
           </section>
           <section className="premium-card">
-            <h2>{role === 'parent' ? 'Coming up' : 'Your upcoming classes'}</h2>
+            <h2>Your upcoming classes</h2>
             {visibleSessions.length === 0 ? (
               <div className="empty-state">{role === 'parent' ? 'No upcoming classes for this child.' : 'No upcoming sessions.'}</div>
             ) : (
@@ -1091,23 +1130,8 @@ function LearnerDashboard({ role }) {
           </section>
         </div>
       )}
-      {tab === 'materials' && role !== 'parent' && (
+      {tab === 'materials' && (
         <>
-          <section className="premium-card mb-6">
-            <h2>Announcements</h2>
-            {visibleNotices.length === 0 ? <p className="text-muted mt-4">No announcements yet.</p> : (
-              <ul className="session-list-mini mt-4">
-                {visibleNotices.slice(0, 20).map((item) => (
-                  <li key={item._id}>
-                    <div>
-                      <p>{item.text}</p>
-                      {item.createdAt && <small className="text-muted">{formatDateTime(item.createdAt)}</small>}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
           <section className="premium-card">
             <h2>Class notes</h2>
             <div className="batch-field mt-4">
@@ -1121,11 +1145,17 @@ function LearnerDashboard({ role }) {
               />
             </div>
             {visibleResources.length === 0 ? <p className="text-muted mt-4">No materials yet.</p> : (
-              <ul className="session-list-mini mt-4">
+              <ul className="notes-bullet-list">
                 {visibleResources.map((item) => (
                   <li key={item._id}>
-                    <a href={item.downloadUrl || item.url} target="_blank" rel="noreferrer">{item.title}</a>
-                    <span className="text-muted text-sm">{item.mimeType || item.type} · {formatDate(item.createdAt)}</span>
+                    <div className="notes-bullet-content">
+                      <a href={item.downloadUrl || item.url} target="_blank" rel="noreferrer">
+                        {item.title}
+                      </a>
+                      <span className="notes-bullet-meta">
+                        {item.mimeType || item.type} · {formatDate(item.createdAt)}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ul>

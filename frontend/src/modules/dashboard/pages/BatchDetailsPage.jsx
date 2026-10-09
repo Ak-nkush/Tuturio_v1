@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { batchApi, inviteApi, sessionApi, announcementApi, resourceApi, attendanceApi, formatSchedule, formatDate, formatDateTime, studentRosterState } from '../../../lib/api'
+import { batchApi, inviteApi, sessionApi, announcementApi, resourceApi, attendanceApi, progressApi, analyticsApi, formatSchedule, formatDate, formatDateTime, studentRosterState } from '../../../lib/api'
 import { TutorBatchAssignments } from '../components/AssignmentBoards'
-import { BatchFormModal } from '../components/BatchFormModal'
+import { ProgressBoard } from '../components/BatchBoards'
 import '../../../styles/dashboard.css'
 
 function InviteLinkCard({ label, inviteUrl, email, code, onRevoke, revoked }) {
@@ -74,11 +74,12 @@ const BATCH_SECTIONS = [
   ['overview', 'Overview'],
   ['students', 'Students'],
   ['attendance', 'Attendance'],
-  ['invites', 'Invites'],
+  ['progress', 'Progress'],
+  ['assignments', 'Assignments'],
   ['classes', 'Classes'],
   ['materials', 'Materials'],
   ['announcements', 'Announcements'],
-  ['assignments', 'Assignments'],
+  ['invites', 'Invites'],
 ]
 
 export function BatchDetailsPage() {
@@ -88,6 +89,7 @@ export function BatchDetailsPage() {
   const [batch, setBatch] = useState(null)
   const [students, setStudents] = useState([])
   const [sessions, setSessions] = useState([])
+  const [progress, setProgress] = useState([])
   const [error, setError] = useState('')
   const [holidayDate, setHolidayDate] = useState('')
   const [holidayConfirm, setHolidayConfirm] = useState(null)
@@ -101,7 +103,6 @@ export function BatchDetailsPage() {
   const [uploadFile, setUploadFile] = useState(null)
   const [linkTitle, setLinkTitle] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
-  const [editing, setEditing] = useState(false)
   const [studentTab, setStudentTab] = useState('active')
   const [attendance, setAttendance] = useState({ students: [], classes: [] })
   const [extraClass, setExtraClass] = useState({ topic: '', date: localDateTimeValue() })
@@ -146,12 +147,13 @@ export function BatchDetailsPage() {
   }, [batch, sessions])
 
   async function load() {
-    const [detail, sessionRes, annRes, resRes, attRes] = await Promise.all([
+    const [detail, sessionRes, annRes, resRes, attRes, progRes] = await Promise.all([
       batchApi.get(batchId),
       sessionApi.byBatch(batchId),
       announcementApi.getByBatch(batchId),
       resourceApi.getByBatch(batchId),
       attendanceApi.byBatch(batchId),
+      progressApi.byBatch(batchId),
     ])
     setBatch(detail.batch)
     setStudents(detail.students ?? [])
@@ -162,6 +164,7 @@ export function BatchDetailsPage() {
       students: attRes.students ?? [],
       classes: attRes.classes ?? [],
     })
+    setProgress(progRes.progress ?? [])
     setError('')
   }
 
@@ -192,11 +195,6 @@ export function BatchDetailsPage() {
     } finally {
       setSaving(false)
     }
-  }
-
-  async function saveBatch(payload) {
-    await batchApi.update(batchId, payload)
-    await load()
   }
 
   async function removeHoliday(date) {
@@ -350,14 +348,9 @@ export function BatchDetailsPage() {
 
   return (
     <div>
-      <div className="page-toolbar">
-        <button type="button" className="back-btn" onClick={() => navigate('/tutor/dashboard/batches')}>
-          ← Back to batches
-        </button>
-        <button type="button" className="btn-outline" onClick={() => setEditing(true)}>
-          Edit batch
-        </button>
-      </div>
+      <button type="button" className="back-btn" onClick={() => navigate('/tutor/dashboard/batches')}>
+        ← Back to batches
+      </button>
       <div className="dashboard-header">
         <div>
           <span className="eyebrow">Batch workspace</span>
@@ -381,27 +374,84 @@ export function BatchDetailsPage() {
       </nav>
 
       {section === 'overview' && (
+        <div className="batch-overview-stats">
+          <button
+            type="button"
+            className="batch-stat-card"
+            onClick={() => setSection('students')}
+          >
+            <span className="stat-icon green">👥</span>
+            <strong className="stat-number">{studentGroups.active.length}</strong>
+            <span className="stat-label">Active students</span>
+          </button>
+
+          <button
+            type="button"
+            className="batch-stat-card"
+            onClick={() => setSection('classes')}
+          >
+            <span className="stat-icon amber">🗓️</span>
+            <strong className="stat-number">{sessions.filter((s) => s.status === 'scheduled').length}</strong>
+            <span className="stat-label">Scheduled classes</span>
+          </button>
+
+          <button
+            type="button"
+            className="batch-stat-card"
+            onClick={() => setSection('progress')}
+          >
+            <span className="stat-icon blue">📈</span>
+            <strong className="stat-number">{progress.length}</strong>
+            <span className="stat-label">Progress records</span>
+          </button>
+
+          <button
+            type="button"
+            className="batch-stat-card"
+            onClick={() => setSection('announcements')}
+          >
+            <span className="stat-icon pink">📢</span>
+            <strong className="stat-number">{announcements.length}</strong>
+            <span className="stat-label">Announcements</span>
+          </button>
+
+          <button
+            type="button"
+            className="batch-stat-card"
+            onClick={() => setSection('materials')}
+          >
+            <span className="stat-icon purple">📚</span>
+            <strong className="stat-number">{resources.length}</strong>
+            <span className="stat-label">Materials</span>
+          </button>
+        </div>
+      )}
+
+      {section === 'progress' && (
         <section className="premium-card mb-6">
-          <h2>At a glance</h2>
-          <div className="stats-grid mt-4">
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
             <div>
-              <strong>{studentGroups.active.length}</strong>
-              <p className="text-muted">Active students</p>
+              <h2 style={{ margin: 0 }}>Student Progress & Marks</h2>
+              <p className="text-muted" style={{ margin: '4px 0 0' }}>
+                Log and track unit tests, quiz scores, and subject milestones for students in this batch.
+              </p>
             </div>
-            <div>
-              <strong>{sessions.filter((s) => s.status === 'scheduled').length}</strong>
-              <p className="text-muted">Scheduled classes</p>
-            </div>
-            <div>
-              <strong>{announcements.length}</strong>
-              <p className="text-muted">Announcements</p>
-            </div>
-            <div>
-              <strong>{resources.length}</strong>
-              <p className="text-muted">Materials</p>
-            </div>
+            <button
+              type="button"
+              className="btn-outline btn-sm"
+              title="Export progress report as .xlsx"
+              onClick={() => analyticsApi.exportProgress(batchId)}
+            >
+              ↗ Export .xlsx
+            </button>
           </div>
-          <p className="text-muted mt-4">Use the tabs above to manage students, attendance, invites, classes, materials, announcements, and assignments for this batch.</p>
+          <ProgressBoard
+            batchId={batchId}
+            students={students}
+            subjects={batch?.subjects ?? []}
+            items={progress}
+            onChange={setProgress}
+          />
         </section>
       )}
 
@@ -423,6 +473,7 @@ export function BatchDetailsPage() {
             </button>
           </div>
         </form>
+        <hr className="section-divider" />
         {announcements.length === 0 ? (
           <p className="text-muted mt-4">No announcements yet.</p>
         ) : (
@@ -468,6 +519,7 @@ export function BatchDetailsPage() {
             Add link
           </button>
         </form>
+        <hr className="section-divider" />
         {resources.length === 0 ? (
           <p className="text-muted mt-4">No materials shared yet.</p>
         ) : (
@@ -547,8 +599,14 @@ export function BatchDetailsPage() {
 
       {section === 'attendance' && (
       <section className="premium-card mb-6">
-        <h2>Attendance</h2>
-        <p className="text-muted">Present and late count as attended. Click a class to mark present, absent, late, or excused. You can change a saved present mark to absent and save again.</p>
+        <div>
+          <h2 style={{ margin: 0 }}>Attendance</h2>
+          <p className="text-muted" style={{ margin: '4px 0 0' }}>
+            Present and late count as attended. Click a class link below to open the session workspace and mark attendance.
+          </p>
+        </div>
+
+        {/* Summary table */}
         {attendance.students.length === 0 ? (
           <p className="text-muted mt-4">No active students in this batch yet.</p>
         ) : (
@@ -579,6 +637,8 @@ export function BatchDetailsPage() {
             </table>
           </div>
         )}
+
+        {/* Classes list */}
         <h3 className="mt-6">Classes</h3>
         {attendance.classes.length === 0 ? (
           <p className="text-muted mt-4">No classes yet. Add them when you create or edit the batch, or from the Classes tab.</p>
@@ -598,6 +658,7 @@ export function BatchDetailsPage() {
         )}
       </section>
       )}
+
 
       {section === 'students' && (
       <section className="premium-card mb-6">
@@ -842,13 +903,6 @@ export function BatchDetailsPage() {
           </>
         )}
       </section>
-      )}
-      {editing && (
-        <BatchFormModal
-          batch={batch}
-          onClose={() => setEditing(false)}
-          onSave={saveBatch}
-        />
       )}
     </div>
   )

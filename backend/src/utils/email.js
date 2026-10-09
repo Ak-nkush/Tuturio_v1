@@ -14,11 +14,21 @@ function smtpConfigured() {
   return true
 }
 
+function isDeliverableEmail(email) {
+  if (!email || typeof email !== 'string') return false
+  const lower = email.trim().toLowerCase()
+  if (lower.endsWith('.local') || lower.endsWith('.test') || lower.endsWith('@example.com')) {
+    return false
+  }
+  return true
+}
+
 function fromAddress() {
   const from = String(env.emailFrom ?? '').trim()
   if (from && !/example\.com|tuturio\.local/i.test(from)) return from
   return `Tuturio <${env.smtpUser}>`
 }
+
 
 function smtpSetupError() {
   return new Error(
@@ -64,6 +74,10 @@ export function hashResetToken(token) {
 }
 
 export async function sendPasswordResetEmail(email, resetUrl) {
+  if (!isDeliverableEmail(email)) {
+    console.log(`Skipping password reset email to test domain: ${email}`)
+    return
+  }
   const transporter = await getTransporter()
   try {
     const info = await transporter.sendMail({
@@ -79,7 +93,43 @@ export async function sendPasswordResetEmail(email, resetUrl) {
   }
 }
 
+// Sends an email copy of an in-app notification.
+// Fire-and-forget: silently returns when SMTP is not configured, and logs
+// (never throws) on send failure so the underlying Tuturio action is unaffected.
+export async function sendNotificationEmail(email, title, message) {
+  if (!smtpConfigured() || !isDeliverableEmail(email)) return
+  let transporter
+  try {
+    transporter = await getTransporter()
+  } catch {
+    return
+  }
+  const html = `
+    <div style="font-family:Georgia,serif;line-height:1.6;color:#19332D;max-width:560px">
+      <h2 style="margin-bottom:8px">${title}</h2>
+      <p style="margin-top:0">${message}</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
+      <p style="color:#888;font-size:12px">You received this email because you have notifications enabled in Tuturio. Adjust your preferences in your account settings.</p>
+    </div>
+  `
+  try {
+    await transporter.sendMail({
+      from: fromAddress(),
+      to: email,
+      subject: title,
+      text: `${title}\n\n${message}`,
+      html,
+    })
+  } catch (err) {
+    console.error(`Failed to send notification email to ${email}:`, describeMailError(err))
+  }
+}
+
 export async function sendInviteEmail(email, role, inviteUrl, batchName) {
+  if (!isDeliverableEmail(email)) {
+    console.log(`Skipping invite email to test domain: ${email}`)
+    return
+  }
   const transporter = await getTransporter()
   const subject = `You're invited to join ${batchName} on Tuturio`
   const text = `You've been invited to join "${batchName}" as a ${role}. Open this link to join: ${inviteUrl}`
@@ -105,3 +155,4 @@ export async function sendInviteEmail(email, role, inviteUrl, batchName) {
     throw new Error(describeMailError(err))
   }
 }
+

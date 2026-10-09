@@ -6,6 +6,7 @@ import { User } from '../models/User.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { generateBatchId } from '../utils/ids.js'
 import { generateSessionsForBatch, previewScheduleChange, regenerateFutureSessions } from '../services/sessionService.js'
+import { notifyMany, parentIdsForStudents } from '../services/notificationService.js'
 
 const router = Router()
 
@@ -286,6 +287,23 @@ router.patch('/:batchId', requireRole('tutor'), async (req, res) => {
     sessionsCreated += extras.length
 
     res.json({ batch: publicBatch(batch), sessionsCreated })
+
+    // Notify students + parents when the schedule changed (R6, R7 — tutor excluded)
+    if (scheduleChanged) {
+      const studentIds = batch.enrollment.filter((e) => e.status === 'active').map((e) => e.studentId)
+      const parentIds = await parentIdsForStudents(studentIds)
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      const days = (nextSchedule.days ?? []).map((d) => dayNames[d]).join(', ') || 'TBD'
+      const payload = {
+        title: 'Schedule updated',
+        message: `The schedule for ${batch.name} has changed to ${days} at ${nextSchedule.time}.`,
+        type: 'batch',
+        event: 'batch',
+        link: null,
+      }
+      notifyMany(studentIds, payload)
+      notifyMany(parentIds, payload)
+    }
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -374,6 +392,20 @@ router.post('/:batchId/holidays', requireRole('tutor'), async (req, res) => {
     )
 
     res.json({ batch: publicBatch(batch), sessionsCancelled: cancelled.modifiedCount ?? 0 })
+
+    // Notify active students and their linked parents (R6, R7 — tutor excluded)
+    const studentIds = batch.enrollment.filter((e) => e.status === 'active').map((e) => e.studentId)
+    const parentIds = await parentIdsForStudents(studentIds)
+    const dateLabel = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    const payload = {
+      title: 'Holiday marked',
+      message: `${batch.name} has a holiday on ${dateLabel}. Classes scheduled for that day are cancelled.`,
+      type: 'batch',
+      event: 'batch',
+      link: null,
+    }
+    notifyMany(studentIds, payload)
+    notifyMany(parentIds, payload)
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })
@@ -405,6 +437,20 @@ router.delete('/:batchId/holidays', requireRole('tutor'), async (req, res) => {
     )
 
     res.json({ batch: publicBatch(batch) })
+
+    // Notify active students and their linked parents (R6, R7 — tutor excluded)
+    const studentIds = batch.enrollment.filter((e) => e.status === 'active').map((e) => e.studentId)
+    const parentIds = await parentIdsForStudents(studentIds)
+    const dateLabel = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    const payload = {
+      title: 'Holiday removed',
+      message: `The holiday on ${dateLabel} for ${batch.name} has been removed. Classes are back on as scheduled.`,
+      type: 'batch',
+      event: 'batch',
+      link: null,
+    }
+    notifyMany(studentIds, payload)
+    notifyMany(parentIds, payload)
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })

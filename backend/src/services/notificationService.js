@@ -1,6 +1,7 @@
 import { Notification } from '../models/Notification.js'
 import { User } from '../models/User.js'
 import { emitToUser } from './socketService.js'
+import { sendNotificationEmail } from '../utils/email.js'
 
 const DEFAULT_PREFS = {
   messages: true,
@@ -24,9 +25,22 @@ export async function notify(userId, { title, message, type = 'system', link = n
     if (!wantsEvent(user, event)) return
     const n = await Notification.create({ userId, title, message, type, link, event })
     emitToUser(userId, 'notification:new', n)
+    // Email copy — fire-and-forget, never blocks the in-app path (R1, R8)
+    if (user?.email) {
+      sendNotificationEmail(user.email, title, message).catch((err) =>
+        console.error('Notification email error:', err.message),
+      )
+    }
   } catch (err) {
     console.error('Failed to create notification:', err.message)
   }
+}
+
+export async function parentIdsForStudents(studentIds) {
+  const unique = [...new Set(studentIds.filter(Boolean))]
+  if (!unique.length) return []
+  const students = await User.find({ userId: { $in: unique } }).select('linkedParentIds')
+  return [...new Set(students.flatMap((student) => student.linkedParentIds ?? []))]
 }
 
 export async function notifyMany(userIds, payload) {
@@ -34,6 +48,7 @@ export async function notifyMany(userIds, payload) {
   if (!unique.length) return
   try {
     const users = await User.find({ userId: { $in: unique } })
+    const emailByUserId = Object.fromEntries(users.filter((u) => u.email).map((u) => [u.userId, u.email]))
     const allowed = users.filter((u) => wantsEvent(u, payload.event ?? 'batch')).map((u) => u.userId)
     if (!allowed.length) return
     const { event, ...rest } = payload
@@ -41,8 +56,18 @@ export async function notifyMany(userIds, payload) {
     for (const doc of docs) {
       emitToUser(doc.userId, 'notification:new', doc)
     }
+    // Email copies — fire-and-forget, never blocks the in-app path (R1, R8)
+    for (const userId of allowed) {
+      const email = emailByUserId[userId]
+      if (email) {
+        sendNotificationEmail(email, payload.title, payload.message).catch((err) =>
+          console.error('Notification email error:', err.message),
+        )
+      }
+    }
   } catch (err) {
     console.error('Failed to create notifications:', err.message)
   }
 }
+
 

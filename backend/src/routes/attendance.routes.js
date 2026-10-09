@@ -1,4 +1,6 @@
 import { Router } from 'express'
+import ExcelJS from 'exceljs'
+import multer from 'multer'
 import { Attendance } from '../models/Attendance.js'
 import { Session } from '../models/Session.js'
 import { Batch } from '../models/Batch.js'
@@ -6,6 +8,50 @@ import { User } from '../models/User.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { ATTENDANCE_STATUSES, validObjectIdParam } from '../utils/validate.js'
 import { notifyMany } from '../services/notificationService.js'
+
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+const xlsxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === XLSX_MIME || file.originalname.endsWith('.xlsx')) cb(null, true)
+    else cb(new Error('Only .xlsx files are accepted'))
+  },
+}).single('file')
+
+function parseImportStatus(raw) {
+  if (!raw && raw !== 0) return null
+  const s = String(raw).trim().toLowerCase()
+  if (s === 'present' || s === 'p') return 'present'
+  if (s === 'absent'  || s === 'a') return 'absent'
+  if (s === 'late'    || s === 'l') return 'late'
+  if (s === 'excused' || s === 'e') return 'excused'
+  return null
+}
+
+async function upsertAttendanceRecord({ sessionId, studentId, batchId, status, changedBy }) {
+  const existing = await Attendance.findOne({ sessionId, studentId })
+  if (existing) {
+    if (existing.status !== status) {
+      existing.corrections.push({
+        previousStatus: existing.status,
+        newStatus: status,
+        note: `Imported via Excel (changed from ${existing.status} to ${status})`,
+        changedBy,
+        changedAt: new Date(),
+      })
+      existing.status = status
+      existing.markedBy = changedBy
+      existing.markedAt = new Date()
+      await existing.save()
+    }
+    return 'updated'
+  }
+  await Attendance.create({ sessionId, studentId, batchId, status, markedBy: changedBy, markedAt: new Date() })
+  return 'created'
+}
+
 
 async function withSessionMeta(records) {
   const list = records.map((row) => (row.toObject ? row.toObject() : row))
@@ -325,5 +371,228 @@ router.delete('/session/:sessionId/student/:studentId', requireRole('tutor'), va
     res.status(500).json({ error: 'Server error' })
   }
 })
+
+// ─── Import: single-session ───────────────────────────────────────────────────
+// POST /attendance/import/session/:sessionId
+// Accepts a .xlsx upload. Matches rows by Student Name or Student ID.
+router.post('/import/session/:sessionId', requireRole('tutor'), validObjectIdParam('sessionId'), (req, res, next) => {
+  xlsxUpload(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message })
+    next()
+  })
+}, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+
+    const session = await Session.findOne({ _id: req.params.sessionId, tutorId: req.user.userId })
+    if (!session) return res.status(404).json({ error: 'Session not found or unauthorized' })
+
+    const batch = await Batch.findOne({ batchId: session.batchId, status: 'active' })
+    if (!batch) return res.status(404).json({ error: 'Batch not found' })
+
+    const activeStudentIds = new Set(
+      batch.enrollment.filter((e) => e.status === 'active').map((e) => e.studentId),
+    )
+    const activeUsers = await User.find({ userId: { $in: [...activeStudentIds] } })
+    const studentMap = new Map() // lower name or id -> studentId
+    for (const u of activeUsers) {
+      studentMap.set(u.userId.toLowerCase(), u.userId)
+      studentMap.set(u.name.trim().toLowerCase(), u.userId)
+    }
+
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(req.file.buffer)
+    const ws = wb.getWorksheet(1)
+    if (!ws) return res.status(400).json({ error: 'Workbook has no sheets' })
+
+    let imported = 0, skipped = 0
+    const errors = []
+    const work = []
+
+    // Locate header row containing 'Student Name' or 'Student ID'
+    let headerRowNumber = 1
+    let statusColNumber = 2
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      const cell1 = String(row.getCell(1).value ?? '').trim().toLowerCase()
+      const cell2 = String(row.getCell(2).value ?? '').trim().toLowerCase()
+      if (cell1.includes('student') || cell1 === 'name') {
+        headerRowNumber = rowNumber
+        if (cell2.includes('id')) {
+          statusColNumber = 3
+        } else {
+          statusColNumber = 2
+        }
+      }
+    })
+
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber <= headerRowNumber) return // skip title and header rows
+      const val1 = String(row.getCell(1).value ?? '').trim()
+      const val2 = String(row.getCell(2).value ?? '').trim()
+      const val3 = row.getCell(3).value
+
+      if (!val1 && !val2) { skipped++; return }
+
+      // Try resolving student from Col 1 (name) or Col 2 (ID)
+      let resolvedStudentId = studentMap.get(val1.toLowerCase())
+      let rawStatus = row.getCell(statusColNumber).value
+
+      if (!resolvedStudentId && val2) {
+        resolvedStudentId = studentMap.get(val2.toLowerCase())
+        if (resolvedStudentId) {
+          rawStatus = val3
+        }
+      }
+
+      if (!resolvedStudentId) {
+        errors.push({ row: rowNumber, name: val1, error: 'Student not found in active batch roster' })
+        skipped++
+        return
+      }
+
+      const status = parseImportStatus(rawStatus)
+      if (!status) {
+        if (rawStatus === null || rawStatus === '' || rawStatus === undefined || rawStatus === '—') {
+          skipped++
+          return
+        }
+        errors.push({ row: rowNumber, student: val1, value: String(rawStatus), error: 'Unrecognised status — use Present, Absent, Late, or Excused' })
+        skipped++
+        return
+      }
+
+      work.push({ studentId: resolvedStudentId, status })
+    })
+
+    for (const { studentId, status } of work) {
+      await upsertAttendanceRecord({
+        sessionId: req.params.sessionId,
+        studentId,
+        batchId: session.batchId,
+        status,
+        changedBy: req.user.userId,
+      })
+      imported++
+    }
+
+    res.json({ imported, skipped, errors })
+  } catch (err) {
+    console.error('Import session error:', err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// ─── Import: full batch ───────────────────────────────────────────────────────
+// POST /attendance/import/batch/:batchId
+// Accepts a .xlsx upload that matches the batch export format (with or without Student ID column).
+router.post('/import/batch/:batchId', requireRole('tutor'), (req, res, next) => {
+  xlsxUpload(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message })
+    next()
+  })
+}, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+
+    const batch = await Batch.findOne({ batchId: req.params.batchId, tutorId: req.user.userId, status: 'active' })
+    if (!batch) return res.status(404).json({ error: 'Batch not found' })
+
+    const activeStudentIds = new Set(
+      batch.enrollment.filter((e) => e.status === 'active').map((e) => e.studentId),
+    )
+    const activeUsers = await User.find({ userId: { $in: [...activeStudentIds] } })
+    const studentMap = new Map() // lower name or id -> studentId
+    for (const u of activeUsers) {
+      studentMap.set(u.userId.toLowerCase(), u.userId)
+      studentMap.set(u.name.trim().toLowerCase(), u.userId)
+    }
+
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(req.file.buffer)
+    const ws = wb.getWorksheet(1)
+    if (!ws) return res.status(400).json({ error: 'Workbook has no sheets' })
+
+    const allSessions = await Session.find({ batchId: batch.batchId }).sort({ date: 1 })
+
+    // Find header row that contains dates or "Student Name"
+    let headerRowNumber = 1
+    const colToSession = {} // colIndex -> Session doc
+
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      let matchedSessionsInRow = 0
+      row.eachCell((cell, colNumber) => {
+        const headerText = String(cell.value ?? '').trim()
+        const match = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(headerText)
+        if (match) {
+          const [, dd, mm, yyyy] = match
+          const targetDate = new Date(`${yyyy}-${mm}-${dd}T00:00:00`)
+          const session = allSessions.find((s) => {
+            const sd = new Date(s.date)
+            return sd.getFullYear() === targetDate.getFullYear() &&
+                   sd.getMonth()   === targetDate.getMonth() &&
+                   sd.getDate()    === targetDate.getDate()
+          })
+          if (session) {
+            colToSession[colNumber] = session
+            matchedSessionsInRow++
+          }
+        }
+      })
+      if (matchedSessionsInRow > 0 && !headerRowNumber) {
+        headerRowNumber = rowNumber
+      } else if (matchedSessionsInRow > 0) {
+        headerRowNumber = rowNumber
+      }
+    })
+
+    let imported = 0, skipped = 0
+    const errors = []
+    const work = []
+
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber <= headerRowNumber) return
+      const val1 = String(row.getCell(1).value ?? '').trim()
+      const val2 = String(row.getCell(2).value ?? '').trim()
+      if (!val1 && !val2) { skipped++; return }
+
+      let resolvedStudentId = studentMap.get(val1.toLowerCase())
+      if (!resolvedStudentId && val2) {
+        resolvedStudentId = studentMap.get(val2.toLowerCase())
+      }
+
+      if (!resolvedStudentId) {
+        errors.push({ row: rowNumber, name: val1, error: 'Student not found in active batch roster' })
+        skipped++
+        return
+      }
+
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const session = colToSession[colNumber]
+        if (!session) return
+        const status = parseImportStatus(cell.value)
+        if (!status) {
+          const raw = cell.value
+          if (raw !== null && raw !== '' && raw !== undefined && raw !== '—') {
+            errors.push({ row: rowNumber, col: colNumber, student: val1, value: String(raw), error: 'Unrecognised status' })
+          }
+          skipped++
+          return
+        }
+        work.push({ sessionId: String(session._id), studentId: resolvedStudentId, batchId: batch.batchId, status })
+      })
+    })
+
+    for (const item of work) {
+      await upsertAttendanceRecord({ ...item, changedBy: req.user.userId })
+      imported++
+    }
+
+    res.json({ imported, skipped, errors })
+  } catch (err) {
+    console.error('Import batch error:', err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 
 export default router

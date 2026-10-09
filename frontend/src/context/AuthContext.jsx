@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { authApi, dashboardPath, postLoginPath } from '../lib/api'
+import { authApi, dashboardPath, postLoginPath, setOnSessionLost } from '../lib/api'
 
 const AuthContext = createContext(null)
 
@@ -24,6 +24,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     refreshUser().finally(() => setLoading(false))
   }, [refreshUser])
+
+  useEffect(() => {
+    setOnSessionLost(() => setUser(null))
+    return () => setOnSessionLost(null)
+  }, [])
 
   const login = useCallback(async (email, password) => {
     const { user: loggedIn } = await authApi.login(email, password)

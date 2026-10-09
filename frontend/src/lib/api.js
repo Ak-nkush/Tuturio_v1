@@ -24,7 +24,47 @@ async function parseJson(res) {
   return data
 }
 
-export async function apiFetch(path, init) {
+const AUTH_NO_REFRESH = new Set([
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/refresh',
+  '/api/auth/logout',
+  '/api/auth/forgot-password',
+])
+
+let refreshInFlight = null
+let onSessionLost = null
+
+export function setOnSessionLost(handler) {
+  onSessionLost = handler
+}
+
+function shouldRefresh(path) {
+  const route = String(path).split('?')[0]
+  if (AUTH_NO_REFRESH.has(route)) return false
+  if (route.startsWith('/api/auth/reset-password')) return false
+  return true
+}
+
+function refreshSession() {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Session expired')
+        return res
+      })
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+  return refreshInFlight
+}
+
+export async function apiFetch(path, init, allowRefresh = true) {
   const isFormData = init?.body instanceof FormData
   const res = await fetch(path, {
     ...init,
@@ -34,6 +74,16 @@ export async function apiFetch(path, init) {
       ...(init?.headers ?? {}),
     },
   })
+
+  if (res.status === 401 && allowRefresh && shouldRefresh(path)) {
+    try {
+      await refreshSession()
+      return apiFetch(path, init, false)
+    } catch {
+      onSessionLost?.()
+    }
+  }
+
   return parseJson(res)
 }
 
@@ -144,6 +194,23 @@ export const attendanceApi = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  importSession: (sessionId, file) => {
+    const body = new FormData()
+    body.append('file', file)
+    return apiFetch(`/api/attendance/import/session/${sessionId}`, { method: 'POST', body })
+  },
+  importBatch: (batchId, file) => {
+    const body = new FormData()
+    body.append('file', file)
+    return apiFetch(`/api/attendance/import/batch/${batchId}`, { method: 'POST', body })
+  },
+  // Returns a Blob (for Send-via-Chat — keeps file in memory instead of triggering download)
+  exportSessionBlob: async (batchId, sessionId) => {
+    const url = `/api/analytics/export/attendance/${batchId}?sessionId=${encodeURIComponent(sessionId)}`
+    const res = await fetch(url, { credentials: 'include' })
+    if (!res.ok) throw new Error('Could not export attendance')
+    return { blob: await res.blob(), filename: `attendance_${batchId}_session.xlsx` }
+  },
 }
 
 export const announcementApi = {
@@ -182,8 +249,13 @@ export const analyticsApi = {
   batch: (batchId) => apiFetch(`/api/analytics/batch/${batchId}`),
   student: () => apiFetch('/api/analytics/student/overview'),
   parent: () => apiFetch('/api/analytics/parent/overview'),
-  exportAttendance: (batchId) => downloadCsv(`/api/analytics/export/attendance/${batchId}`),
-  exportProgress: (batchId) => downloadCsv(`/api/analytics/export/progress/${batchId}`),
+  exportAttendance: (batchId, sessionId) => {
+    const url = sessionId
+      ? `/api/analytics/export/attendance/${batchId}?sessionId=${encodeURIComponent(sessionId)}`
+      : `/api/analytics/export/attendance/${batchId}`
+    return downloadFile(url, `attendance_${batchId}.xlsx`)
+  },
+  exportProgress: (batchId) => downloadFile(`/api/analytics/export/progress/${batchId}`, `progress_${batchId}.xlsx`),
 }
 
 export const assignmentApi = {
@@ -247,11 +319,6 @@ export const messageApi = {
 
 export const userApi = {
   updateProfile: (body) => apiFetch('/api/users/profile', { method: 'PUT', body: JSON.stringify(body) }),
-  uploadProfilePicture: (file) => {
-    const body = new FormData()
-    body.append('file', file)
-    return apiFetch('/api/users/profile-picture', { method: 'POST', body })
-  },
   archive: (userId) => apiFetch(`/api/users/${userId}/archive`, { method: 'POST' }),
   unarchive: (userId) => apiFetch(`/api/users/${userId}/unarchive`, { method: 'POST' }),
 }
@@ -265,15 +332,16 @@ export const subjectApi = {
   archive: (subjectId) => apiFetch(`/api/subjects/${subjectId}`, { method: 'DELETE' }),
 }
 
-async function downloadCsv(path) {
+async function downloadFile(path, defaultName) {
   const res = await fetch(path, { credentials: 'include' })
   if (!res.ok) throw new Error('Could not download file')
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  const match = /filename=([^;]+)/.exec(res.headers.get('Content-Disposition') ?? '')
+  const cd = res.headers.get('Content-Disposition') ?? ''
+  const match = /filename="?([^";]+)"?/.exec(cd)
   link.href = url
-  link.download = match?.[1] ?? 'export.csv'
+  link.download = match?.[1] ?? defaultName
   link.click()
   URL.revokeObjectURL(url)
 }

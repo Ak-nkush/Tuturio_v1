@@ -667,10 +667,10 @@ async function main() {
       allStudents,
     )
 
-    const csvAtt = await tutor.req('GET', `/api/analytics/export/attendance/${batchId}`)
-    check('Attendance CSV export', csvAtt.status === 200 && String(csvAtt.data).includes('Student ID'), csvAtt)
+    const xlsxAtt = await tutor.req('GET', `/api/analytics/export/attendance/${batchId}`)
+    check('Attendance Excel export (.xlsx)', xlsxAtt.status === 200 && (String(xlsxAtt.data).startsWith('PK') || xlsxAtt.data.length > 100), xlsxAtt)
     const csvProg = await tutor.req('GET', `/api/analytics/export/progress/${batchId}`)
-    check('Progress CSV export', csvProg.status === 200 && String(csvProg.data).includes('Student ID'), csvProg)
+    check('Progress Excel export (.xlsx)', csvProg.status === 200 && (String(csvProg.data).startsWith('PK') || csvProg.data.length > 100), csvProg)
 
     const batchStats = await tutor.req('GET', `/api/analytics/batch/${batchId}`)
     check(

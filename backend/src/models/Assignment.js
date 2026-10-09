@@ -8,7 +8,6 @@ const assignmentSchema = new Schema(
     description: { type: String, trim: true, default: '' },
     dueDate: { type: Date, required: true },
     maxScore: { type: Number, required: true },
-    attachments: { type: [String], default: [] }, // Array of URLs
   },
   { timestamps: true }
 )

@@ -43,12 +43,4 @@ router.get('/submissions/:submissionId', validObjectIdParam('submissionId'), asy
   return sendStoredFile(res, submission)
 })
 
-router.get('/profiles/:userId', async (req, res) => {
-  const user = await User.findOne({ userId: req.params.userId })
-  if (!user?.profilePicture) return res.status(404).json({ error: 'File not found' })
-  const allowed = req.user.userId === user.userId || await areRelated(req.user.userId, user.userId)
-  if (!allowed) return res.status(403).json({ error: 'Forbidden' })
-  return sendStoredFile(res, { storageKey: user.profilePicture, fileName: 'profile-picture', mimeType: 'image/*' })
-})
-
 export default router

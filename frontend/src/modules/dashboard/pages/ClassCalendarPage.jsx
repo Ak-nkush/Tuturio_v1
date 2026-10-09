@@ -61,11 +61,7 @@ export function ClassCalendarPage() {
     )
   }, [batches, childId, role])
 
-  const title = role === 'parent'
-    ? 'Family calendar'
-    : role === 'student'
-      ? 'My calendar'
-      : 'Class calendar'
+  const title = role === 'tutor' ? 'Class calendar' : 'My calendar'
 
   return (
     <div>
@@ -76,9 +72,7 @@ export function ClassCalendarPage() {
           <p>
             {role === 'tutor'
               ? 'Week, month, and year views of classes that already exist across your batches.'
-              : role === 'parent'
-                ? 'See which days have a class. Empty days simply mean nothing is scheduled yet.'
-                : 'See your upcoming and past classes. Empty days mean no class has been created yet.'}
+              : 'See your upcoming and past classes. Empty days mean no class has been created yet.'}
           </p>
         </div>
       </div>
@@ -107,7 +101,7 @@ export function ClassCalendarPage() {
       <ClassCalendar
         batches={visibleBatches}
         studentId={role === 'parent' ? childId : ''}
-        sessionHref={role === 'tutor' ? (id) => `/tutor/dashboard/sessions/${id}` : null}
+        sessionHref={null}
         defaultView="week"
         title={title}
       />

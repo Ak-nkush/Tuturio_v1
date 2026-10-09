@@ -74,6 +74,25 @@ export function TutorChatPage({ embedded = false }) {
     loadLists().catch((err) => setError(err.message))
   }, [])
 
+  // Pick up a file pre-attached via "Send via Chat" from SessionWorkspacePage
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('chatAttachment')
+      if (!stored) return
+      sessionStorage.removeItem('chatAttachment')
+      const { dataUrl, filename } = JSON.parse(stored)
+      fetch(dataUrl)
+        .then((r) => r.blob())
+        .then((blob) => {
+          const file = new File([blob], filename, { type: blob.type })
+          setFiles((prev) => [...prev, file])
+        })
+        .catch(() => {})
+    } catch {
+      // ignore corrupt sessionStorage entries
+    }
+  }, [])
+
   const socket = useSocket()
 
   useEffect(() => {
@@ -146,19 +165,68 @@ export function TutorChatPage({ embedded = false }) {
     }
   }, [socket, activeId, user])
 
+  const [newChatOpen, setNewChatOpen] = useState(false)
+  const [newChatSearch, setNewChatSearch] = useState('')
+
   const people = useMemo(() => {
     const byId = new Map()
-    contacts.forEach((c) => byId.set(c.userId, { ...c, unread: 0, lastMessage: '' }))
-    conversations.forEach((c) => {
-      const existing = byId.get(c.userId) ?? { userId: c.userId, name: c.name, role: 'student' }
-      byId.set(c.userId, { ...existing, ...c })
-    })
+
+    if (isLearner) {
+      // For learner (student/parent), list conversations and include assigned tutor
+      conversations.forEach((c) => {
+        byId.set(c.userId, { ...c })
+      })
+      contacts.forEach((c) => {
+        if (!byId.has(c.userId)) {
+          byId.set(c.userId, { ...c, unread: 0, lastMessage: '' })
+        }
+      })
+    } else {
+      // For tutor: ONLY show conversations that actually have messages!
+      conversations.forEach((c) => {
+        const contactInfo = contacts.find((item) => item.userId === c.userId)
+        byId.set(c.userId, {
+          ...contactInfo,
+          ...c,
+          name: c.name || contactInfo?.name || c.userId,
+          role: c.role || contactInfo?.role || 'student',
+        })
+      })
+
+      // If activeId is currently open (e.g. freshly picked via + New Chat), keep it in the list
+      if (activeId && !byId.has(activeId)) {
+        const contact = contacts.find((c) => c.userId === activeId)
+        if (contact) {
+          byId.set(activeId, {
+            ...contact,
+            lastMessage: '',
+            unread: 0,
+          })
+        }
+      }
+    }
+
     return [...byId.values()].sort((a, b) => {
       const unreadDiff = Number(b.unread ?? 0) - Number(a.unread ?? 0)
       if (unreadDiff) return unreadDiff
+      const dateA = a.lastAt ? new Date(a.lastAt).getTime() : 0
+      const dateB = b.lastAt ? new Date(b.lastAt).getTime() : 0
+      if (dateB !== dateA) return dateB - dateA
       return String(a.name).localeCompare(String(b.name))
     })
-  }, [contacts, conversations])
+  }, [contacts, conversations, activeId, isLearner])
+
+  const availableContacts = useMemo(() => {
+    const conversationUserIds = new Set(conversations.map((c) => c.userId))
+    const list = contacts.filter((c) => !conversationUserIds.has(c.userId))
+    if (!newChatSearch.trim()) return list
+    const q = newChatSearch.toLowerCase()
+    return list.filter(
+      (c) =>
+        c.name?.toLowerCase().includes(q) ||
+        (c.role === 'parent' ? 'parent' : 'student').includes(q),
+    )
+  }, [contacts, conversations, newChatSearch])
 
   const visiblePeople = useMemo(() => {
     if (isLearner || roleFilter === 'all') return people
@@ -184,7 +252,18 @@ export function TutorChatPage({ embedded = false }) {
     }
   }, [roleFilter, visiblePeople, activeId])
 
-  const activePerson = people.find((person) => person.userId === activeId)
+  const activePerson = people.find((person) => person.userId === activeId) || contacts.find((c) => c.userId === activeId)
+
+  function openThread(userId) {
+    setActiveId(userId)
+  }
+
+  function closeThread() {
+    setActiveId('')
+    setMessages([])
+    setDraft('')
+    setFiles([])
+  }
 
   async function send(e) {
     e.preventDefault()
@@ -211,7 +290,7 @@ export function TutorChatPage({ embedded = false }) {
   }
 
   return (
-    <div className="chat-page">
+    <div className={`chat-page${activeId ? ' is-thread-open' : ''}`}>
       {!embedded && (
         <div className="dashboard-header chat-page-header">
           <div>
@@ -226,53 +305,88 @@ export function TutorChatPage({ embedded = false }) {
         </div>
       )}
       {error && <div className="alert error">{error}</div>}
-      <div className="chat-layout">
+      <div className={`chat-layout${activeId ? ' is-thread-open' : ''}`}>
         <aside className="chat-list premium-card">
           {!isLearner && (
-            <div className="chat-filter" role="tablist" aria-label="Filter conversations">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'student', label: 'Students' },
-                { id: 'parent', label: 'Parents' },
-              ].map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={roleFilter === option.id}
-                  className={`chat-filter-btn ${roleFilter === option.id ? 'active' : ''}`}
-                  onClick={() => setRoleFilter(option.id)}
-                >
-                  {option.label}
-                  <span className="chat-filter-count">{filterCounts[option.id]}</span>
-                  {option.id !== 'all' && unreadByFilter[option.id] > 0 && (
-                    <span className="chat-unread">{unreadByFilter[option.id] > 99 ? '99+' : unreadByFilter[option.id]}</span>
-                  )}
-                </button>
-              ))}
+            <div className="chat-list-top">
+              <div className="chat-filter" role="tablist" aria-label="Filter conversations">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'student', label: 'Students' },
+                  { id: 'parent', label: 'Parents' },
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={roleFilter === option.id}
+                    className={`chat-filter-btn ${roleFilter === option.id ? 'active' : ''}`}
+                    onClick={() => setRoleFilter(option.id)}
+                  >
+                    {option.label}
+                    <span className="chat-filter-count">{filterCounts[option.id]}</span>
+                    {(() => {
+                      const totalUnread = option.id === 'all' ? (unreadByFilter.student + unreadByFilter.parent) : unreadByFilter[option.id]
+                      return totalUnread > 0 ? (
+                        <span className="chat-unread">{totalUnread > 99 ? '99+' : totalUnread}</span>
+                      ) : null
+                    })()}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="chat-new-btn"
+                onClick={() => setNewChatOpen(true)}
+                title="Start a new chat with an enrolled student or parent"
+              >
+                + New Chat
+              </button>
             </div>
           )}
           {people.length === 0 ? (
-            <p className="text-muted">
-              {isLearner
-                ? 'No tutor conversation yet. You will see your tutor here after you join a batch.'
-                : 'No contacts yet. Invite students to a batch first.'}
-            </p>
+            <div className="chat-empty-sidebar">
+              <p className="text-muted">
+                {isLearner
+                  ? 'No tutor conversation yet. You will see your tutor here after you join a batch.'
+                  : 'No active conversations.'}
+              </p>
+              {!isLearner && availableContacts.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-outline btn-sm mt-3"
+                  onClick={() => setNewChatOpen(true)}
+                >
+                  + Start a Chat
+                </button>
+              )}
+            </div>
           ) : visiblePeople.length === 0 ? (
-            <p className="text-muted">
-              {roleFilter === 'parent'
-                ? 'No parent conversations yet. Invite a parent, then they can message you here.'
-                : 'No student conversations in this filter.'}
-            </p>
+            <div className="chat-empty-sidebar">
+              <p className="text-muted">
+                {roleFilter === 'parent'
+                  ? 'No parent conversations.'
+                  : 'No student conversations.'}
+              </p>
+              {!isLearner && availableContacts.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-outline btn-sm mt-3"
+                  onClick={() => setNewChatOpen(true)}
+                >
+                  + Start a Chat
+                </button>
+              )}
+            </div>
           ) : (
             visiblePeople.map((person) => (
               <button
                 type="button"
                 key={person.userId}
-                className={`chat-person ${activeId === person.userId ? 'active' : ''}`}
-                onClick={() => setActiveId(person.userId)}
+                className={`chat-person ${activeId === person.userId ? 'active' : ''} kind-${personKind(person)}`}
+                onClick={() => openThread(person.userId)}
               >
-                <span className="chat-avatar" aria-hidden="true">{initials(person.name)}</span>
+                <span className={`chat-avatar kind-${personKind(person)}`} aria-hidden="true">{initials(person.name)}</span>
                 <span className="chat-person-copy">
                   <strong>{person.name}</strong>
                   <small>{threadLabel(person, isLearner)}</small>
@@ -283,6 +397,61 @@ export function TutorChatPage({ embedded = false }) {
             ))
           )}
         </aside>
+
+        {newChatOpen && (
+          <div className="modal-overlay" onClick={() => setNewChatOpen(false)}>
+            <div className="modal-card new-chat-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>Start a New Chat</h3>
+                <button type="button" className="modal-close" onClick={() => setNewChatOpen(false)}>
+                  ×
+                </button>
+              </div>
+              <div className="new-chat-search-wrap">
+                <input
+                  type="text"
+                  className="new-chat-search-input"
+                  placeholder="Search enrolled students or parents…"
+                  value={newChatSearch}
+                  onChange={(e) => setNewChatSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="new-chat-results">
+                {availableContacts.length === 0 ? (
+                  <p className="text-muted p-4 text-center">
+                    {contacts.length === 0
+                      ? 'No contacts found.'
+                      : newChatSearch
+                        ? 'No matching contacts found.'
+                        : 'All contacts already have active chat threads.'}
+                  </p>
+                ) : (
+                  availableContacts.map((c) => (
+                    <button
+                      key={c.userId}
+                      type="button"
+                      className="new-chat-contact-row"
+                      onClick={() => {
+                        openThread(c.userId)
+                        setNewChatOpen(false)
+                        setNewChatSearch('')
+                      }}
+                    >
+                      <span className={`chat-avatar kind-${personKind(c)}`}>
+                        {initials(c.name)}
+                      </span>
+                      <div className="new-chat-contact-info">
+                        <strong>{c.name}</strong>
+                        <small>{c.role === 'parent' ? 'Parent' : 'Student'}</small>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         <section className="chat-thread premium-card">
           {!activeId ? (
             <div className="empty-state chat-empty">
@@ -297,7 +466,10 @@ export function TutorChatPage({ embedded = false }) {
           ) : (
             <>
               <header className="chat-thread-head">
-                <span className="chat-avatar" aria-hidden="true">{initials(activePerson?.name)}</span>
+                <button type="button" className="chat-back" onClick={closeThread} aria-label="Back to conversations">
+                  ←
+                </button>
+                <span className={`chat-avatar kind-${personKind(activePerson)}`} aria-hidden="true">{initials(activePerson?.name)}</span>
                 <div>
                   <strong>{activePerson?.name ?? 'Conversation'}</strong>
                   <small>{threadLabel(activePerson, isLearner)}</small>
@@ -338,11 +510,19 @@ export function TutorChatPage({ embedded = false }) {
                 </ul>
               )}
               <form className="chat-compose" onSubmit={send}>
+                <button
+                  type="button"
+                  className="chat-icon-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Attach a file"
+                >
+                  +
+                </button>
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={onDraftKeyDown}
-                  placeholder="Write a message"
+                  placeholder="Write a message…"
                   rows={1}
                 />
                 <input
@@ -354,14 +534,11 @@ export function TutorChatPage({ embedded = false }) {
                   onChange={(e) => setFiles([...e.target.files])}
                 />
                 <button
-                  type="button"
-                  className="btn-outline chat-attach"
-                  onClick={() => fileInputRef.current?.click()}
+                  type="submit"
+                  className="chat-send-btn"
+                  disabled={sending || (!draft.trim() && files.length === 0)}
                 >
-                  Attach
-                </button>
-                <button type="submit" className="btn-primary" disabled={sending}>
-                  {sending ? 'Sending…' : 'Send'}
+                  {sending ? '…' : 'Send'}
                 </button>
               </form>
             </>

@@ -6,6 +6,7 @@ import cors from 'cors'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { connectDb } from './db/connect.js'
+import { ensureDemoData } from './db/ensureDemoData.js'
 import { env } from './config/env.js'
 import authRoutes from './routes/auth.routes.js'
 import inviteRoutes from './routes/invite.routes.js'
@@ -81,10 +82,12 @@ app.use((error, _req, res, next) => {
 
 async function start() {
   await connectDb()
+  await ensureDemoData()
   httpServer.listen(env.port, () => {
     console.log(`API running on http://localhost:${env.port}`)
   })
 }
+
 
 start().catch((err) => {
   console.error(err)

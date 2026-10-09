@@ -1,10 +1,9 @@
-import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { GrainOverlay } from '../../../components/layout/GrainOverlay'
-import { BrandLogo } from '../../../components/brand/BrandLogo'
 import { useAuth } from '../../../context/AuthContext'
 import { useSocket } from '../../../context/SocketContext'
 import { messageApi, notificationApi } from '../../../lib/api'
+import { DashboardShell } from './DashboardShell'
 import '../../../styles/dashboard.css'
 import '../../../styles/auth.css'
 
@@ -73,72 +72,24 @@ export function LearnerDashboardLayout({ role }) {
     }
   }, [socket])
 
-  const links = role === 'parent'
-    ? [
-        { to: href(''), end: true, icon: '⌂', label: 'Home' },
-        { to: href('/calendar'), icon: '▦', label: 'Calendar' },
-        { to: href('/attendance'), icon: '◷', label: 'Attendance' },
-        { to: href('/assignments'), icon: '✎', label: 'Assignments' },
-        { to: href('/chat'), icon: '✉', label: 'Messages', badge: unreadChats },
-        { to: href('/notifications'), icon: '●', label: 'Updates', badge: unreadNotes },
-        { to: href('/settings'), icon: '⚙', label: 'Settings' },
-      ]
-    : [
-        { to: href(''), end: true, icon: '✧', label: 'My classes' },
-        { to: href('/calendar'), icon: '▦', label: 'Calendar' },
-        { to: href('/attendance'), icon: '◷', label: 'My attendance' },
-        { to: href('/assignments'), icon: '✎', label: 'Assignments' },
-        { to: href('/materials'), icon: '▤', label: 'My notes' },
-        { to: href('/chat'), icon: '✉', label: 'Tutor chat', badge: unreadChats },
-        { to: href('/notifications'), icon: '●', label: 'Notifications', badge: unreadNotes },
-        { to: href('/settings'), icon: '⚙', label: 'Settings' },
-      ]
+  const links = [
+    { to: href(''), end: true, icon: '✧', label: 'My classes' },
+    { to: href('/calendar'), icon: '▦', label: 'Calendar' },
+    { to: href('/attendance'), icon: '◷', label: 'My attendance' },
+    { to: href('/assignments'), icon: '✎', label: 'Assignments' },
+    { to: href('/materials'), icon: '▤', label: 'My notes' },
+    { to: href('/chat'), icon: '✉', label: 'Tutor chat', badge: unreadChats },
+    { to: href('/notifications'), icon: '●', label: 'Notifications', badge: unreadNotes },
+    { to: href('/settings'), icon: '⚙', label: 'Settings' },
+  ]
 
   return (
-    <div className={`dashboard-layout learner-shell role-${role}`}>
-      <GrainOverlay />
-      <aside className={`dashboard-sidebar sidebar-${role}`}>
-        <div className="sidebar-header">
-          <BrandLogo to={base} size="md" />
-          <div className="user-profile">
-            <span className="user-avatar">
-              {user?.profilePictureUrl ? (
-                <img src={user.profilePictureUrl} alt="" />
-              ) : (
-                user?.name?.charAt(0).toUpperCase()
-              )}
-            </span>
-            <div className="user-info">
-              <span className="user-name">{user?.name}</span>
-              <span className={`user-role ${role}`}>{role === 'parent' ? 'Parent' : 'Student'}</span>
-            </div>
-          </div>
-        </div>
-        <nav className="sidebar-nav">
-          {links.map((link) => (
-            <NavLink
-              key={link.label}
-              to={link.to}
-              end={Boolean(link.end)}
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <span className="nav-icon">{link.icon}</span>
-              <span className="nav-label">{link.label}</span>
-              {link.badge > 0 && <span className="nav-badge">{link.badge > 99 ? '99+' : link.badge}</span>}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <button type="button" className="logout-button" onClick={() => logout()}>
-            Log Out
-          </button>
-        </div>
-      </aside>
-      <main className="dashboard-main">
-        <div className="dashboard-content-wrap">
-          <Outlet />
-        </div>
-      </main>
-    </div>
+    <DashboardShell
+      role={role}
+      homeTo={base}
+      user={user}
+      onLogout={logout}
+      links={links}
+    />
   )
 }
