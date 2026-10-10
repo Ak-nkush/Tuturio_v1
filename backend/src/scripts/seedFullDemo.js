@@ -20,7 +20,7 @@ async function main() {
   console.log('  Password: Password123!')
   console.log('  Linked Children: 2 (Child 1 in Grade 10 & Child 2 in Grade 9)')
   console.log('\nSTUDENT 1 (Child 1 - Grade 10):')
-  console.log('  Email: 01ankushmahadole@gmail.com')
+  console.log('  Email: 01ankush.mahadole@gmail.com')
   console.log('  Password: Password123!')
   console.log('\nSTUDENT 2 (Child 2 - Sibling in Grade 9):')
   console.log('  Email: rohan.mahadole@tuturio.local')

@@ -21,7 +21,7 @@ function defaultPrefs() {
 
 router.get('/', async (req, res) => {
   try {
-    const notifications = await Notification.find({ userId: req.user.userId, isRead: false })
+    const notifications = await Notification.find({ userId: req.user.userId })
       .sort({ createdAt: -1 })
       .limit(50)
     res.json({ notifications })
@@ -62,7 +62,17 @@ router.patch('/preferences', async (req, res) => {
 
 router.patch('/read-all', async (req, res) => {
   try {
-    await Notification.deleteMany({ userId: req.user.userId, isRead: false })
+    await Notification.updateMany({ userId: req.user.userId, isRead: false }, { isRead: true })
+    res.json({ message: 'All notifications marked as read' })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+router.delete('/clear-all', async (req, res) => {
+  try {
+    await Notification.deleteMany({ userId: req.user.userId })
     res.json({ message: 'All notifications cleared' })
   } catch (error) {
     console.error(error)
@@ -77,8 +87,24 @@ router.patch('/:id/read', async (req, res) => {
       return res.status(404).json({ error: 'Notification not found' })
     }
 
+    notification.isRead = true
+    await notification.save()
+    res.json({ notification, message: 'Notification marked as read' })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id)
+    if (!notification || notification.userId !== req.user.userId) {
+      return res.status(404).json({ error: 'Notification not found' })
+    }
+
     await notification.deleteOne()
-    res.json({ message: 'Notification dismissed' })
+    res.json({ message: 'Notification deleted' })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Server error' })

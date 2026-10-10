@@ -212,7 +212,7 @@ export async function ensureDemoData({ force = false } = {}) {
   const child1 = await User.create({
     userId: 'USR-STUD01',
     name: 'Ankush Mahadole (Child 1 - Gr 10)',
-    email: normalizeEmail('01ankushmahadole@gmail.com'),
+    email: normalizeEmail('01ankush.mahadole@gmail.com'),
     role: 'student',
     passwordHash: defaultPasswordHash,
     linkedParentIds: [primaryParent.userId],

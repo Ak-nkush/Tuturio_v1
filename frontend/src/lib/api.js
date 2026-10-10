@@ -285,7 +285,9 @@ export const assignmentApi = {
 export const notificationApi = {
   list: () => apiFetch('/api/notifications'),
   read: (id) => apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' }),
+  delete: (id) => apiFetch(`/api/notifications/${id}`, { method: 'DELETE' }),
   readAll: () => apiFetch('/api/notifications/read-all', { method: 'PATCH' }),
+  clearAll: () => apiFetch('/api/notifications/clear-all', { method: 'DELETE' }),
   preferences: () => apiFetch('/api/notifications/preferences'),
   updatePreferences: (body) =>
     apiFetch('/api/notifications/preferences', { method: 'PATCH', body: JSON.stringify(body) }),

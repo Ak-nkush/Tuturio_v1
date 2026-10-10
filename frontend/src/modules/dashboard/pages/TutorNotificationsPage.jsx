@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useSocket } from '../../../context/SocketContext'
 import { notificationApi, formatDateTime } from '../../../lib/api'
 import '../../../styles/dashboard.css'
@@ -37,14 +36,43 @@ export function TutorNotificationsPage({ embedded = false }) {
     }
   }, [socket])
 
-  async function openNotification(note) {
-    await notificationApi.read(note._id)
-    setItems((current) => current.filter((item) => item._id !== note._id))
+  async function markRead(id) {
+    try {
+      await notificationApi.read(id)
+      setItems((current) =>
+        current.map((item) => (item._id === id ? { ...item, isRead: true } : item))
+      )
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
-  async function markAll() {
-    await notificationApi.readAll()
-    setItems([])
+  async function deleteNotification(id) {
+    try {
+      await notificationApi.delete(id)
+      setItems((current) => current.filter((item) => item._id !== id))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function markAllRead() {
+    try {
+      await notificationApi.readAll()
+      setItems((current) => current.map((item) => ({ ...item, isRead: true })))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function clearAll() {
+    if (!window.confirm('Delete all notifications?')) return
+    try {
+      await notificationApi.clearAll()
+      setItems([])
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   async function togglePref(key) {
@@ -55,30 +83,22 @@ export function TutorNotificationsPage({ embedded = false }) {
 
   return (
     <div>
-      {!embedded && (
-        <div className="dashboard-header section-heading">
-          <div>
-            <span className="eyebrow">Inbox</span>
-            <h1>Notifications</h1>
-            <p>View events and choose what you want to receive.</p>
-          </div>
-          <button type="button" className="btn-outline" onClick={markAll}>
+      <div className="dashboard-header section-heading">
+        <div>
+          <span className="eyebrow">Inbox</span>
+          <h1>Notifications</h1>
+          <p>View message updates and manage your inbox.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.65rem' }}>
+          <button type="button" className="btn-outline btn-sm" onClick={markAllRead} disabled={items.length === 0}>
+            Mark all read
+          </button>
+          <button type="button" className="btn-outline btn-sm" onClick={clearAll} disabled={items.length === 0}>
             Clear all
           </button>
         </div>
-      )}
-      {embedded && (
-        <div className="dashboard-header section-heading">
-          <div>
-            <span className="eyebrow">Inbox</span>
-            <h1>Notifications</h1>
-            <p>View events and choose what you want to receive.</p>
-          </div>
-          <button type="button" className="btn-outline" onClick={markAll}>
-            Clear all
-          </button>
-        </div>
-      )}
+      </div>
+
       {error && <div className="alert error">{error}</div>}
 
       <section className="premium-card mb-6">
@@ -96,30 +116,78 @@ export function TutorNotificationsPage({ embedded = false }) {
       </section>
 
       <section className="premium-card">
-        <h2>Inbox</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2 style={{ margin: 0 }}>Inbox ({items.filter(n => !n.isRead).length} unread)</h2>
+        </div>
+
         {items.length === 0 ? (
-          <p className="text-muted mt-4">No new notifications.</p>
+          <p className="text-muted mt-4">No notifications in your inbox.</p>
         ) : (
           <ul className="notification-feed mt-4">
             {items.map((n) => (
-              <li key={n._id} className="unread">
-                <div>
-                  <strong>{n.title}</strong>
-                  <p>{n.message}</p>
-                  <small className="text-muted">{formatDateTime(n.createdAt)}</small>
+              <li
+                key={n._id}
+                className={n.isRead ? 'read' : 'unread'}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: '1.25rem',
+                  padding: '1.15rem 1.25rem',
+                  borderRadius: '12px',
+                  background: n.isRead ? 'rgba(255, 255, 255, 0.015)' : 'rgba(255, 255, 255, 0.04)',
+                  border: n.isRead ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid rgba(255, 255, 255, 0.12)',
+                  marginBottom: '0.75rem',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem' }}>
+                    <strong style={{ fontSize: '0.98rem', color: 'var(--chalk, #fff)' }}>{n.title}</strong>
+                    {!n.isRead && (
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          color: '#34d399',
+                          background: 'rgba(52, 211, 153, 0.12)',
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '9999px',
+                        }}
+                      >
+                        New
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: '0 0 0.5rem', fontSize: '0.92rem', lineHeight: 1.55, color: 'var(--chalk, #e5e7eb)' }}>
+                    {n.message}
+                  </p>
+                  <small className="text-muted" style={{ fontSize: '0.78rem' }}>
+                    🗓️ {formatDateTime(n.createdAt)}
+                  </small>
                 </div>
-                <div className="table-actions">
-                  {n.link && (
-                    <Link
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0 }}>
+                  {!n.isRead ? (
+                    <button
+                      type="button"
                       className="btn-outline btn-sm"
-                      to={n.link}
-                      onClick={() => openNotification(n)}
+                      onClick={() => markRead(n._id)}
                     >
-                      Open
-                    </Link>
+                      Mark read
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: '0.8rem', color: 'var(--chalk-dim, #9ca3af)', marginRight: '0.25rem' }}>
+                      ✓ Read
+                    </span>
                   )}
-                  <button type="button" className="btn-outline btn-sm" onClick={() => openNotification(n)}>
-                    Dismiss
+                  <button
+                    type="button"
+                    className="danger-button btn-sm"
+                    onClick={() => deleteNotification(n._id)}
+                  >
+                    Delete
                   </button>
                 </div>
               </li>
@@ -130,3 +198,4 @@ export function TutorNotificationsPage({ embedded = false }) {
     </div>
   )
 }
+

@@ -106,6 +106,7 @@ export function BatchDetailsPage() {
   const [studentTab, setStudentTab] = useState('active')
   const [attendance, setAttendance] = useState({ students: [], classes: [] })
   const [extraClass, setExtraClass] = useState({ topic: '', date: localDateTimeValue() })
+  const fileInputRef = useRef(null)
 
   const sectionParam = searchParams.get('section') === 'notices'
     ? 'announcements'
@@ -305,12 +306,20 @@ export function BatchDetailsPage() {
     }
   }
 
-  async function uploadResource() {
-    if (!uploadFile) return
+  async function uploadResource(e) {
+    if (e) e.preventDefault()
+    if (!uploadFile) {
+      if (fileInputRef.current) {
+        fileInputRef.current.click()
+      }
+      return
+    }
     try {
       setSaving(true)
+      setError('')
       await resourceApi.upload(batchId, uploadFile)
       setUploadFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
       await load()
     } catch (err) {
       setError(err.message)
@@ -477,14 +486,23 @@ export function BatchDetailsPage() {
         {announcements.length === 0 ? (
           <p className="text-muted mt-4">No announcements yet.</p>
         ) : (
-          <ul className="session-list-mini mt-4">
+          <ul className="announcement-feed mt-4">
             {announcements.map((a) => (
-              <li key={a._id}>
-                <p>{a.text}</p>
-                <small className="text-muted">{formatDateTime(a.createdAt)}</small>
-                <button type="button" className="danger-button" onClick={() => deleteAnnouncement(a._id)}>
-                  Delete
-                </button>
+              <li key={a._id} className="announcement-card">
+                <div className="announcement-main">
+                  <p className="announcement-text">{a.text}</p>
+                  <div className="announcement-footer">
+                    <span className="announcement-date">
+                      <span className="announcement-icon">🗓️</span>
+                      {formatDateTime(a.createdAt)}
+                    </span>
+                  </div>
+                </div>
+                <div className="announcement-actions">
+                  <button type="button" className="danger-button" onClick={() => deleteAnnouncement(a._id)}>
+                    Delete
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -500,38 +518,101 @@ export function BatchDetailsPage() {
       <section className="premium-card mb-6">
         <h2>Notes & materials</h2>
         <p className="text-muted">Share PDFs, images, Word files, text, or links with the batch.</p>
-        <div className="holiday-row mt-4">
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.doc,.docx" onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)} />
-          <button type="button" className="btn-outline" onClick={uploadResource} disabled={!uploadFile || saving}>
-            Upload file
-          </button>
+        
+        {/* Modern File Upload Card */}
+        <div className="mt-4" style={{ padding: '1.25rem', background: 'rgba(255, 255, 255, 0.03)', border: '1.5px dashed rgba(255, 255, 255, 0.15)', borderRadius: '12px' }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: 'none' }}
+            accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.doc,.docx"
+            onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+              <button
+                type="button"
+                className="btn-outline btn-sm"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                📂 {uploadFile ? 'Change file' : 'Choose file'}
+              </button>
+              <span style={{ fontSize: '0.9rem', color: uploadFile ? 'var(--chalk, #fff)' : 'var(--chalk-dim, #9ca3af)', fontWeight: uploadFile ? 600 : 400 }}>
+                {uploadFile ? `Selected: ${uploadFile.name} (${(uploadFile.size / 1024).toFixed(0)} KB)` : 'No file chosen (PDF, Images, DOCX, TXT)'}
+              </span>
+            </div>
+            {uploadFile && (
+              <button
+                type="button"
+                className="btn-primary btn-sm"
+                onClick={uploadResource}
+                disabled={saving}
+              >
+                {saving ? 'Uploading to Cloudinary…' : 'Upload file'}
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* External Link Form */}
         <form className="batch-action-form mt-4" onSubmit={addLink}>
           <div className="batch-field">
             <label htmlFor="material-link-title">Link title</label>
-            <input id="material-link-title" className="form-input" value={linkTitle} onChange={(e) => setLinkTitle(e.target.value)} placeholder="Link title" />
+            <input id="material-link-title" className="form-input" value={linkTitle} onChange={(e) => setLinkTitle(e.target.value)} placeholder="e.g. Physics Formula Sheet" />
           </div>
           <div className="batch-field">
             <label htmlFor="material-link-url">URL</label>
-            <input id="material-link-url" className="form-input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://" />
+            <input id="material-link-url" className="form-input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
           </div>
-          <button type="submit" className="btn-outline" disabled={saving}>
+          <button type="submit" className="btn-outline" disabled={saving || !linkTitle.trim() || !linkUrl.trim()}>
             Add link
           </button>
         </form>
+
         <hr className="section-divider" />
+        
         {resources.length === 0 ? (
           <p className="text-muted mt-4">No materials shared yet.</p>
         ) : (
-          <ul className="session-list-mini mt-4">
+          <ul className="announcement-feed mt-4">
             {resources.map((r) => (
-              <li key={r._id}>
-                <a href={r.type === 'file' ? r.downloadUrl : r.url} target="_blank" rel="noreferrer">
-                  {r.title}
-                </a>
-                <button type="button" className="danger-button" onClick={() => deleteResource(r._id)}>
-                  Delete
-                </button>
+              <li key={r._id} className="announcement-card">
+                <div className="announcement-main">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <span style={{ fontSize: '1.25rem' }}>{r.type === 'file' ? '📄' : '🔗'}</span>
+                    <a
+                      href={r.type === 'file' ? r.downloadUrl : r.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: 'var(--chalk, #fff)', fontWeight: 600, fontSize: '0.95rem', textDecoration: 'none' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                      onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                    >
+                      {r.title}
+                    </a>
+                  </div>
+                  <div className="announcement-footer">
+                    <span className="announcement-date">
+                      <span>{r.type === 'file' ? 'File upload' : 'Web link'}</span>
+                      {r.sizeBytes && ` · ${(r.sizeBytes / 1024).toFixed(0)} KB`}
+                      {r.createdAt && ` · ${formatDate(r.createdAt)}`}
+                    </span>
+                  </div>
+                </div>
+                <div className="announcement-actions" style={{ gap: '0.5rem', display: 'flex' }}>
+                  <a
+                    href={r.type === 'file' ? r.downloadUrl : r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-outline btn-sm"
+                    style={{ textDecoration: 'none' }}
+                  >
+                    Open ↗
+                  </a>
+                  <button type="button" className="danger-button btn-sm" onClick={() => deleteResource(r._id)}>
+                    Delete
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

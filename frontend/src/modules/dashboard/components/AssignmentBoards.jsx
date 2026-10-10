@@ -10,14 +10,8 @@ function localDateTimeValue(value = new Date(Date.now() + 7 * 864e5)) {
 }
 
 function statusInfo(assignment) {
-  if (assignment.submission?.status === 'graded') {
-    return { label: 'Graded', tone: 'graded' }
-  }
-  if (assignment.submission?.status === 'submitted') {
+  if (assignment.submission) {
     return { label: 'Submitted', tone: 'submitted' }
-  }
-  if (assignment.dueDate && new Date(assignment.dueDate) < new Date()) {
-    return { label: 'Past due', tone: 'past-due' }
   }
   return { label: 'Not submitted', tone: 'pending' }
 }
@@ -86,8 +80,8 @@ export function StudentAssignmentBoard({ batches = [] }) {
 
                   {item.submission?.downloadUrl && (
                     <div className="assignment-submission-link">
-                      <a href={item.submission.downloadUrl} target="_blank" rel="noreferrer">
-                        📎 {item.submission.fileName || 'View submitted work'}
+                      <a href={item.submission.downloadUrl} download={item.submission.fileName || 'submission.pdf'}>
+                        📥 {item.submission.fileName || 'Download submitted work'}
                       </a>
                     </div>
                   )}
@@ -191,8 +185,8 @@ export function ParentAssignmentBoard({ childId, childName, batches = [] }) {
 
                   {item.submission?.downloadUrl && (
                     <div className="assignment-submission-link">
-                      <a href={item.submission.downloadUrl} target="_blank" rel="noreferrer">
-                        📎 {item.submission.fileName || `${childName}'s submission`}
+                      <a href={item.submission.downloadUrl} download={item.submission.fileName || `${childName}'s submission`}>
+                        📥 {item.submission.fileName || `${childName}'s submission`}
                       </a>
                     </div>
                   )}
@@ -429,12 +423,11 @@ export function TutorBatchAssignments({ batchId, students = [] }) {
                                 {isSubmitted && sub.downloadUrl ? (
                                   <a
                                     href={sub.downloadUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
+                                    download={sub.fileName || 'submission.pdf'}
                                     className="btn-outline btn-sm"
                                     style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', textDecoration: 'none' }}
                                   >
-                                    📎 View {sub.fileName}
+                                    📥 Download {sub.fileName}
                                   </a>
                                 ) : (
                                   <span className="text-muted text-xs">No file submitted</span>

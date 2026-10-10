@@ -69,21 +69,64 @@ export async function scanFile(buffer, mimeType) {
   return { clean: true }
 }
 
-export async function sendStoredFile(res, { storageKey, fileName, mimeType }) {
+function getMimeType(fileName, fallbackMime) {
+  const ext = path.extname(fileName || '').toLowerCase()
+  const map = {
+    '.pdf': 'application/pdf',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.txt': 'text/plain',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  }
+  if (map[ext]) return map[ext]
+  if (fallbackMime && fallbackMime !== 'application/octet-stream' && fallbackMime !== 'binary/octet-stream') {
+    return fallbackMime
+  }
+  return 'application/pdf'
+}
+
+export async function sendStoredFile(res, { storageKey, fileName, mimeType }, options = {}) {
+  const resolvedMime = getMimeType(fileName || storageKey, mimeType)
+  const name = safeName(fileName || path.basename(storageKey) || 'document.pdf')
+  const dispositionType = options.disposition || 'attachment'
+
   if (env.storageProvider === 'cloudinary') {
-    const url = cloudinary.url(storageKey, {
-      resource_type: 'raw',
-      type: 'authenticated',
-      sign_url: true,
-      secure: true,
-      expires_at: Math.floor(Date.now() / 1000) + 60,
-    })
-    return res.redirect(url)
+    try {
+      const privateUrl = cloudinary.utils.private_download_url(storageKey, '', {
+        resource_type: 'raw',
+        type: 'authenticated',
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+      })
+
+      const upstream = await fetch(privateUrl)
+      if (!upstream.ok) {
+        console.warn(`Upstream Cloudinary fetch returned ${upstream.status}, redirecting to signed URL...`)
+        return res.redirect(privateUrl)
+      }
+
+      const buffer = Buffer.from(await upstream.arrayBuffer())
+
+      res.setHeader('Content-Type', resolvedMime)
+      res.setHeader('Content-Disposition', `${dispositionType}; filename="${name}"`)
+      res.setHeader('Content-Length', buffer.length)
+      return res.send(buffer)
+    } catch (err) {
+      console.error('Error sending Cloudinary file:', err)
+      return res.status(500).json({ error: 'Failed to retrieve file from storage' })
+    }
   }
 
   try {
-    return res.download(localPath(storageKey), fileName, { headers: { 'Content-Type': mimeType || 'application/octet-stream' } })
-  } catch {
+    const filePath = localPath(storageKey)
+    res.setHeader('Content-Type', resolvedMime)
+    res.setHeader('Content-Disposition', `${dispositionType}; filename="${name}"`)
+    return res.sendFile(filePath)
+  } catch (err) {
+    console.error('Error sending local file:', err)
     return res.status(404).json({ error: 'File not found' })
   }
 }

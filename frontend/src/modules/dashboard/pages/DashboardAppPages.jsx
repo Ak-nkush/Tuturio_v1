@@ -130,9 +130,9 @@ export function TutorOverviewPage() {
   const attention = []
   if (sessions.length) {
     attention.push({
-      to: '/tutor/dashboard',
+      to: '/tutor/dashboard/batches',
       title: `${sessions.length} class${sessions.length === 1 ? '' : 'es'} today`,
-      detail: 'Open a session to take attendance',
+      detail: 'Open a batch to view sessions & attendance',
       tone: 'amber',
     })
   }

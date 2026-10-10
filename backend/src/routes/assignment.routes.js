@@ -287,9 +287,6 @@ router.post('/:assignmentId/submit', validObjectIdParam('assignmentId'), upload.
     if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this batch' })
 
     const existing = await Submission.findOne({ assignmentId: assignment._id, studentId: req.user.userId })
-    if (existing?.status === 'graded') {
-      return res.status(400).json({ error: 'This assignment is already graded' })
-    }
 
     const stored = await storeFile({
       buffer: req.file.buffer,

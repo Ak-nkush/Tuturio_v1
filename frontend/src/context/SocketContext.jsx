@@ -18,10 +18,12 @@ export function SocketProvider({ children }) {
     }
 
     // Connect to the socket server (proxied via Vite configuration or directly)
-    const newSocket = io({
+    const socketUrl = import.meta.env.VITE_API_URL || undefined
+    const newSocket = io(socketUrl, {
       withCredentials: true,
       autoConnect: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
+      transports: ['websocket', 'polling'],
     })
 
     newSocket.on('connect', () => {

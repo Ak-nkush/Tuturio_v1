@@ -182,10 +182,17 @@
 
 .resource-list,
 .announcement-list,
+.announcement-feed,
 .progress-feed {
   list-style: none;
   padding: 0;
   margin: 0;
+}
+
+.announcement-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
 }
 
 .resource-list li,

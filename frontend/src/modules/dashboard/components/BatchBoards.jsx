@@ -52,14 +52,23 @@ export function AnnouncementBoard({ batchId, items, onChange }) {
       {items.length === 0 ? (
         <p className="text-muted mt-4">No announcements yet.</p>
       ) : (
-        <ul className="announcement-list mt-4">
+        <ul className="announcement-feed mt-4">
           {items.map((item) => (
-            <li key={item._id} className="announcement-item">
-              <p>{item.text}</p>
-              <span className="text-muted text-sm">{formatDateTime(item.createdAt)}</span>
-              <button type="button" className="danger-button" onClick={() => remove(item._id)}>
-                Delete
-              </button>
+            <li key={item._id} className="announcement-card">
+              <div className="announcement-main">
+                <p className="announcement-text">{item.text}</p>
+                <div className="announcement-footer">
+                  <span className="announcement-date">
+                    <span className="announcement-icon">🗓️</span>
+                    {formatDateTime(item.createdAt)}
+                  </span>
+                </div>
+              </div>
+              <div className="announcement-actions">
+                <button type="button" className="danger-button" onClick={() => remove(item._id)}>
+                  Delete
+                </button>
+              </div>
             </li>
           ))}
         </ul>
